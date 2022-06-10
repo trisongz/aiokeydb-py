@@ -27,11 +27,11 @@ class Lock:
     # ARGV[1] - token
     # return 1 if the lock was released, otherwise 0
     LUA_RELEASE_SCRIPT = """
-        local token = keydb.call('get', KEYS[1])
+        local token = KeyDB.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        keydb.call('del', KEYS[1])
+        KeyDB.call('del', KEYS[1])
         return 1
     """
 
@@ -42,11 +42,11 @@ class Lock:
     #           existing ttl or "1" if the existing ttl should be replaced
     # return 1 if the locks time was extended, otherwise 0
     LUA_EXTEND_SCRIPT = """
-        local token = keydb.call('get', KEYS[1])
+        local token = KeyDB.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        local expiration = keydb.call('pttl', KEYS[1])
+        local expiration = KeyDB.call('pttl', KEYS[1])
         if not expiration then
             expiration = 0
         end
@@ -58,7 +58,7 @@ class Lock:
         if ARGV[3] == "0" then
             newttl = ARGV[2] + expiration
         end
-        keydb.call('pexpire', KEYS[1], newttl)
+        KeyDB.call('pexpire', KEYS[1], newttl)
         return 1
     """
 
@@ -67,11 +67,11 @@ class Lock:
     # ARGV[2] - milliseconds
     # return 1 if the locks time was reacquired, otherwise 0
     LUA_REACQUIRE_SCRIPT = """
-        local token = keydb.call('get', KEYS[1])
+        local token = KeyDB.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        keydb.call('pexpire', KEYS[1], ARGV[2])
+        KeyDB.call('pexpire', KEYS[1], ARGV[2])
         return 1
     """
 
