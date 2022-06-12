@@ -26,12 +26,20 @@ class Lock:
     # KEYS[1] - lock name
     # ARGV[1] - token
     # return 1 if the lock was released, otherwise 0
+    # LUA_RELEASE_SCRIPT = """
+    #     local token = KeyDB.call('get', KEYS[1])
+    #     if not token or token ~= ARGV[1] then
+    #         return 0
+    #     end
+    #     KeyDB.call('del', KEYS[1])
+    #     return 1
+    # """
     LUA_RELEASE_SCRIPT = """
-        local token = KeyDB.call('get', KEYS[1])
+        local token = redis.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        KeyDB.call('del', KEYS[1])
+        redis.call('del', KEYS[1])
         return 1
     """
 
@@ -41,37 +49,65 @@ class Lock:
     # ARGV[3] - "0" if the additional time should be added to the lock's
     #           existing ttl or "1" if the existing ttl should be replaced
     # return 1 if the locks time was extended, otherwise 0
+    # LUA_EXTEND_SCRIPT = """
+    #     local token = KeyDB.call('get', KEYS[1])
+    #     if not token or token ~= ARGV[1] then
+    #         return 0
+    #     end
+    #     local expiration = KeyDB.call('pttl', KEYS[1])
+    #     if not expiration then
+    #         expiration = 0
+    #     end
+    #     if expiration < 0 then
+    #         return 0
+    #     end
+
+    #     local newttl = ARGV[2]
+    #     if ARGV[3] == "0" then
+    #         newttl = ARGV[2] + expiration
+    #     end
+    #     KeyDB.call('pexpire', KEYS[1], newttl)
+    #     return 1
+    # """
     LUA_EXTEND_SCRIPT = """
-        local token = KeyDB.call('get', KEYS[1])
+        local token = redis.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        local expiration = KeyDB.call('pttl', KEYS[1])
+        local expiration = redis.call('pttl', KEYS[1])
         if not expiration then
             expiration = 0
         end
         if expiration < 0 then
             return 0
         end
-
         local newttl = ARGV[2]
         if ARGV[3] == "0" then
             newttl = ARGV[2] + expiration
         end
-        KeyDB.call('pexpire', KEYS[1], newttl)
+        redis.call('pexpire', KEYS[1], newttl)
         return 1
     """
+
 
     # KEYS[1] - lock name
     # ARGV[1] - token
     # ARGV[2] - milliseconds
     # return 1 if the locks time was reacquired, otherwise 0
+    # LUA_REACQUIRE_SCRIPT = """
+    #     local token = KeyDB.call('get', KEYS[1])
+    #     if not token or token ~= ARGV[1] then
+    #         return 0
+    #     end
+    #     KeyDB.call('pexpire', KEYS[1], ARGV[2])
+    #     return 1
+    # """
     LUA_REACQUIRE_SCRIPT = """
-        local token = KeyDB.call('get', KEYS[1])
+        local token = redis.call('get', KEYS[1])
         if not token or token ~= ARGV[1] then
             return 0
         end
-        KeyDB.call('pexpire', KEYS[1], ARGV[2])
+        redis.call('pexpire', KEYS[1], ARGV[2])
         return 1
     """
 
@@ -249,7 +285,7 @@ class Lock:
     async def do_release(self, expected_token: bytes):
         if not bool(
             await self.lua_release(
-                keys=[self.name], args=[expected_token], client=self.keydb
+               keys=[self.name], args=[expected_token], client=self.keydb
             )
         ):
             raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
@@ -277,9 +313,9 @@ class Lock:
         additional_time = int(additional_time * 1000)
         if not bool(
             await self.lua_extend(
-                keys=[self.name],
-                args=[self.local.token, additional_time, replace_ttl and "1" or "0"],
-                client=self.keydb,
+               keys=[self.name],
+               args=[self.local.token, additional_time, replace_ttl and "1" or "0"],
+               client=self.keydb,
             )
         ):
             raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
@@ -299,7 +335,7 @@ class Lock:
         timeout = int(self.timeout * 1000)
         if not bool(
             await self.lua_reacquire(
-                keys=[self.name], args=[self.local.token, timeout], client=self.keydb
+               keys=[self.name], args=[self.local.token, timeout], client=self.keydb
             )
         ):
             raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")

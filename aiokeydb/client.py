@@ -43,21 +43,31 @@ from aioredis.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+# from aiokeydb.connection import (
+#     Connection,
+#     #ConnectionPool,
+#     EncodableT,
+#     SSLConnection,
+#     UnixDomainSocketConnection,
+# )
 from aiokeydb.connection import (
     ConnectionPool
 )
 
-from aiokeydb.exceptions import (
+from aioredis.exceptions import (
     ConnectionError,
     DataError,
     ExecAbortError,
     ModuleError,
     NoScriptError,
     PubSubError,
-    KeyDBError,
+    #KeyDBError,
     ResponseError,
     TimeoutError,
     WatchError,
+)
+from aiokeydb.exceptions import (
+    KeyDBError,
 )
 from aiokeydb.lock import Lock
 from aiokeydb.utils import safe_str, str_if_bytes

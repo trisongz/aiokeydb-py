@@ -20,3 +20,7 @@ __pycache__*
 **/authz
 mkdocs.yml
 *_docs*
+aiokeydb/lock/scripts.py
+aiokeydb/mutex/__init__.py
+aiokeydb/mutex/_keydb.py
+aiokeydb/mutex/errors.py
