@@ -39,7 +39,7 @@ class Registry(_AbstractStore):
             decode_responses=True,
         )
 
-    def register_model(self, model_class: type[Model]):
+    def register_model(self, model_class: Type[Model]):
         """Registers the model to this store"""
         if not isinstance(model_class.get_primary_key_field(), str):
             raise NotImplementedError(
