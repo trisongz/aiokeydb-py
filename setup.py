@@ -6,13 +6,13 @@ from setuptools import setup, find_packages
 if sys.version_info.major != 3:
     raise RuntimeError("This package requires Python 3+")
 
-version = '0.0.6'
+version = '0.0.7'
 pkg_name = 'aiokeydb'
 gitrepo = 'trisongz/aiokeydb-py'
 root = Path(__file__).parent
 
 requirements = [
-    'aioredis',
+    'aioredis>=2.0.1',
     'pydantic',
     'anyio',
 ]
