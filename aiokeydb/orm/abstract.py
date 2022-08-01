@@ -30,6 +30,7 @@ from pydantic.fields import SHAPE_TUPLE_ELLIPSIS
 
 
 from aiokeydb.client import KeyDB
+from aiokeydb.asyncio.client import AsyncKeyDB
 from aiokeydb.orm.config import KeyDBConfig
 
 JSON_DUMP_SHAPES = [
@@ -53,7 +54,8 @@ class _AbstractStore(BaseModel):
 
     name: str
     keydb_config: KeyDBConfig
-    keydb_store: KeyDB = None
+    keydb_store: AsyncKeyDB = None
+    #keydb_store: KeyDB = None
     life_span_in_seconds: int = None
 
     class Config:

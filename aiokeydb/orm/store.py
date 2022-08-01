@@ -4,8 +4,12 @@ from typing import Dict
 from typing import Optional, Type
 
 
-from aiokeydb.client import KeyDB
-from aiokeydb.utils import from_url
+#from aiokeydb.client import KeyDB
+#from aiokeydb.utils import from_url
+
+from aiokeydb.asyncio.client import AsyncKeyDB
+from aiokeydb.asyncio.utils import async_from_url
+
 from aiokeydb.orm.abstract import _AbstractStore
 from aiokeydb.orm.config import KeyDBConfig
 from aiokeydb.orm.model import Model
@@ -22,7 +26,7 @@ class Registry(_AbstractStore):
         self,
         name: str,
         keydb_config: KeyDBConfig,
-        keydb_store: Optional[KeyDB] = None,
+        keydb_store: Optional[AsyncKeyDB] = None,
         life_span_in_seconds: Optional[int] = None,
         **data: Any,
     ):
@@ -33,7 +37,7 @@ class Registry(_AbstractStore):
             life_span_in_seconds=life_span_in_seconds,
             **data,
         )
-        self.keydb_store = from_url(
+        self.keydb_store = async_from_url(
             self.keydb_config.keydb_url,
             encoding=self.keydb_config.encoding,
             decode_responses=True,

@@ -1,60 +1,84 @@
-"""
-Modified from 
+from contextlib import contextmanager
+from typing import Any, Dict, Mapping, Union
 
-https://github.com/aio-libs/aioredis-py/blob/master/aioredis/utils.py
-"""
+try:
+    import hiredis  # noqa
 
-from typing import TYPE_CHECKING, TypeVar, overload
+    HIREDIS_AVAILABLE = True
+except ImportError:
+    HIREDIS_AVAILABLE = False
 
-if TYPE_CHECKING:
-    from aiokeydb import KeyDB
-    from aiokeydb.client import Pipeline
+try:
+    import cryptography  # noqa
+
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:
+    CRYPTOGRAPHY_AVAILABLE = False
 
 
-
-_T = TypeVar("_T")
-
-
-def from_url(url, **kwargs):
+def from_url(url, asyncio: bool = False, **kwargs):
     """
     Returns an active Redis client generated from the given database URL.
 
     Will attempt to extract the database id from the path url fragment, if
     none is provided.
     """
+    if asyncio:
+        from aiokeydb.asyncio.client import AsyncKeyDB
+        return AsyncKeyDB.from_url(url, **kwargs)
+    
     from aiokeydb.client import KeyDB
-
     return KeyDB.from_url(url, **kwargs)
 
 
-class pipeline:
-    def __init__(self, keydb_obj: "KeyDB"):
-        self.p: "Pipeline" = keydb_obj.pipeline()
-
-    async def __aenter__(self) -> "Pipeline":
-        return self.p
-
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.p.execute()
-        del self.p
+@contextmanager
+def pipeline(keydb_obj):
+    p = keydb_obj.pipeline()
+    yield p
+    p.execute()
 
 
-# Mypy bug: https://github.com/python/mypy/issues/11005
-@overload
-def str_if_bytes(value: bytes) -> str:  # type: ignore[misc]
-    ...
-
-
-@overload
-def str_if_bytes(value: _T) -> _T:
-    ...
-
-
-def str_if_bytes(value: object) -> object:
+def str_if_bytes(value: Union[str, bytes]) -> str:
     return (
         value.decode("utf-8", errors="replace") if isinstance(value, bytes) else value
     )
 
 
-def safe_str(value: object) -> str:
+def safe_str(value):
     return str(str_if_bytes(value))
+
+
+def dict_merge(*dicts: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Merge all provided dicts into 1 dict.
+    *dicts : `dict`
+        dictionaries to merge
+    """
+    merged = {}
+
+    for d in dicts:
+        merged.update(d)
+
+    return merged
+
+
+def list_keys_to_dict(key_list, callback):
+    return dict.fromkeys(key_list, callback)
+
+
+def merge_result(command, res):
+    """
+    Merge all items in `res` into a list.
+
+    This command is used when sending a command to multiple nodes
+    and the result from each node should be merged into a single list.
+
+    res : 'dict'
+    """
+    result = set()
+
+    for v in res.values():
+        for value in v:
+            result.add(value)
+
+    return list(result)

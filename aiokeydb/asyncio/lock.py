@@ -1,14 +1,16 @@
+import asyncio
 import threading
-import time as mod_time
 import uuid
-from types import SimpleNamespace, TracebackType
-from typing import Optional, Type
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Awaitable, Optional, Union
 
 from aiokeydb.exceptions import LockError, LockNotOwnedError
-from aiokeydb.typing import Number
+
+if TYPE_CHECKING:
+    from aiokeydb.asyncio import AsyncKeyDB
 
 
-class Lock:
+class AsyncLock:
     """
     A shared, distributed Lock. Using Redis for locking allows the Lock
     to be shared across processes and/or machines.
@@ -75,17 +77,17 @@ class Lock:
 
     def __init__(
         self,
-        keydb,
-        name: str,
-        timeout: Optional[Number] = None,
-        sleep: Number = 0.1,
+        keydb: "AsyncKeyDB",
+        name: Union[str, bytes, memoryview],
+        timeout: Optional[float] = None,
+        sleep: float = 0.1,
         blocking: bool = True,
-        blocking_timeout: Optional[Number] = None,
+        blocking_timeout: Optional[float] = None,
         thread_local: bool = True,
     ):
         """
-        Create a new Lock instance named ``name`` using the Redis client
-        supplied by ``keydb``.
+        Create a new Lock instance named ``name`` using the AsyncKeyDB client
+        supplied by ``redis``.
 
         ``timeout`` indicates a maximum life for the lock in seconds.
         By default, it will remain locked until release() is called.
@@ -144,7 +146,7 @@ class Lock:
         self.local.token = None
         self.register_scripts()
 
-    def register_scripts(self) -> None:
+    def register_scripts(self):
         cls = self.__class__
         client = self.keydb
         if cls.lua_release is None:
@@ -154,25 +156,19 @@ class Lock:
         if cls.lua_reacquire is None:
             cls.lua_reacquire = client.register_script(cls.LUA_REACQUIRE_SCRIPT)
 
-    def __enter__(self) -> "Lock":
-        if self.acquire():
+    async def __aenter__(self):
+        if await self.acquire():
             return self
         raise LockError("Unable to acquire lock within the time specified")
 
-    def __exit__(
-        self,
-        exc_type: Optional[Type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
-    ) -> None:
-        self.release()
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        await self.release()
 
-    def acquire(
+    async def acquire(
         self,
-        sleep: Optional[Number] = None,
         blocking: Optional[bool] = None,
-        blocking_timeout: Optional[Number] = None,
-        token: Optional[str] = None,
+        blocking_timeout: Optional[float] = None,
+        token: Optional[Union[str, bytes]] = None,
     ):
         """
         Use Redis to hold a shared, distributed lock named ``name``.
@@ -189,12 +185,11 @@ class Lock:
         object with the default encoding. If a token isn't specified, a UUID
         will be generated.
         """
-        if sleep is None:
-            sleep = self.sleep
+        sleep = self.sleep
         if token is None:
             token = uuid.uuid1().hex.encode()
         else:
-            encoder = self.keydb.get_encoder()
+            encoder = self.keydb.connection_pool.get_encoder()
             token = encoder.encode(token)
         if blocking is None:
             blocking = self.blocking
@@ -202,63 +197,65 @@ class Lock:
             blocking_timeout = self.blocking_timeout
         stop_trying_at = None
         if blocking_timeout is not None:
-            stop_trying_at = mod_time.monotonic() + blocking_timeout
+            stop_trying_at = asyncio.get_event_loop().time() + blocking_timeout
         while True:
-            if self.do_acquire(token):
+            if await self.do_acquire(token):
                 self.local.token = token
                 return True
             if not blocking:
                 return False
-            next_try_at = mod_time.monotonic() + sleep
+            next_try_at = asyncio.get_event_loop().time() + sleep
             if stop_trying_at is not None and next_try_at > stop_trying_at:
                 return False
-            mod_time.sleep(sleep)
+            await asyncio.sleep(sleep)
 
-    def do_acquire(self, token: str) -> bool:
+    async def do_acquire(self, token: Union[str, bytes]) -> bool:
         if self.timeout:
             # convert to milliseconds
             timeout = int(self.timeout * 1000)
         else:
             timeout = None
-        if self.keydb.set(self.name, token, nx=True, px=timeout):
+        if await self.keydb.set(self.name, token, nx=True, px=timeout):
             return True
         return False
 
-    def locked(self) -> bool:
+    async def locked(self) -> bool:
         """
         Returns True if this key is locked by any process, otherwise False.
         """
-        return self.keydb.get(self.name) is not None
+        return await self.keydb.get(self.name) is not None
 
-    def owned(self) -> bool:
+    async def owned(self) -> bool:
         """
         Returns True if this key is locked by this lock, otherwise False.
         """
-        stored_token = self.keydb.get(self.name)
+        stored_token = await self.keydb.get(self.name)
         # need to always compare bytes to bytes
         # TODO: this can be simplified when the context manager is finished
         if stored_token and not isinstance(stored_token, bytes):
-            encoder = self.keydb.get_encoder()
+            encoder = self.keydb.connection_pool.get_encoder()
             stored_token = encoder.encode(stored_token)
         return self.local.token is not None and stored_token == self.local.token
 
-    def release(self) -> None:
-        """
-        Releases the already acquired lock
-        """
+    def release(self) -> Awaitable[None]:
+        """Releases the already acquired lock"""
         expected_token = self.local.token
         if expected_token is None:
             raise LockError("Cannot release an unlocked lock")
         self.local.token = None
-        self.do_release(expected_token)
+        return self.do_release(expected_token)
 
-    def do_release(self, expected_token: str) -> None:
+    async def do_release(self, expected_token: bytes) -> None:
         if not bool(
-            self.lua_release(keys=[self.name], args=[expected_token], client=self.keydb)
+            await self.lua_release(
+                keys=[self.name], args=[expected_token], client=self.keydb
+            )
         ):
             raise LockNotOwnedError("Cannot release a lock" " that's no longer owned")
 
-    def extend(self, additional_time: int, replace_ttl: bool = False) -> bool:
+    def extend(
+        self, additional_time: float, replace_ttl: bool = False
+    ) -> Awaitable[bool]:
         """
         Adds more time to an already acquired lock.
 
@@ -275,19 +272,19 @@ class Lock:
             raise LockError("Cannot extend a lock with no timeout")
         return self.do_extend(additional_time, replace_ttl)
 
-    def do_extend(self, additional_time: int, replace_ttl: bool) -> bool:
+    async def do_extend(self, additional_time, replace_ttl) -> bool:
         additional_time = int(additional_time * 1000)
         if not bool(
-            self.lua_extend(
+            await self.lua_extend(
                 keys=[self.name],
-                args=[self.local.token, additional_time, "1" if replace_ttl else "0"],
+                args=[self.local.token, additional_time, replace_ttl and "1" or "0"],
                 client=self.keydb,
             )
         ):
-            raise LockNotOwnedError("Cannot extend a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot extend a lock that's" " no longer owned")
         return True
 
-    def reacquire(self) -> bool:
+    def reacquire(self) -> Awaitable[bool]:
         """
         Resets a TTL of an already acquired lock back to a timeout value.
         """
@@ -297,12 +294,12 @@ class Lock:
             raise LockError("Cannot reacquire a lock with no timeout")
         return self.do_reacquire()
 
-    def do_reacquire(self) -> bool:
+    async def do_reacquire(self) -> bool:
         timeout = int(self.timeout * 1000)
         if not bool(
-            self.lua_reacquire(
+            await self.lua_reacquire(
                 keys=[self.name], args=[self.local.token, timeout], client=self.keydb
             )
         ):
-            raise LockNotOwnedError("Cannot reacquire a lock that's no longer owned")
+            raise LockNotOwnedError("Cannot reacquire a lock that's" " no longer owned")
         return True

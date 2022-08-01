@@ -1,9 +1,9 @@
 try:
     # if we have crudrouter, the crudrouter will work
     import fastapi_crudrouter as _crudrouter  # noqa: F401
-    from .crudrouter import PydanticAioredisCRUDRouter  # noqa: F401
+    from .crudrouter import KeyDBCRUDRouter  # noqa: F401
 except ImportError:  # pragma: no cover
-    PydanticAioredisCRUDRouter = None
+    KeyDBCRUDRouter = None
 
 try:
     # if we have fastapi, fastapi model will work

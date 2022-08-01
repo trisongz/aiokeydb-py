@@ -19,7 +19,7 @@ CALLABLE = Callable[..., SCHEMA]
 CALLABLE_LIST = Callable[..., List[SCHEMA]]
 
 
-class PydanticAioredisCRUDRouter(CRUDGenerator[SCHEMA]):
+class KeyDBCRUDRouter(CRUDGenerator[SCHEMA]):
     def __init__(
         self,
         schema: Type[SCHEMA],

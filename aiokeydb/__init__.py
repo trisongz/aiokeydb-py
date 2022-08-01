@@ -1,4 +1,7 @@
+import sys
+
 from aiokeydb.client import KeyDB, StrictKeyDB
+from aiokeydb.cluster import KeyDBCluster
 from aiokeydb.connection import (
     BlockingConnectionPool,
     Connection,
@@ -21,7 +24,36 @@ from aiokeydb.exceptions import (
     TimeoutError,
     WatchError,
 )
+from aiokeydb.sentinel import (
+    Sentinel,
+    SentinelConnectionPool,
+    SentinelManagedConnection,
+    SentinelManagedSSLConnection,
+)
 from aiokeydb.utils import from_url
+
+# Handle Async
+
+from aiokeydb.asyncio import (
+    AsyncKeyDB, 
+    StrictAsyncKeyDB,
+    AsyncBlockingConnectionPool,
+    AsyncConnection,
+    AsyncConnectionPool,
+    AsyncSSLConnection,
+    AsyncUnixDomainSocketConnection,
+    AsyncSentinel,
+    AsyncSentinelConnectionPool,
+    AsyncSentinelManagedConnection,
+    AsyncSentinelManagedSSLConnection,
+    async_from_url
+)
+
+
+if sys.version_info >= (3, 8):
+    from importlib import metadata
+else:
+    import importlib_metadata as metadata
 
 
 def int_or_str(value):
@@ -31,7 +63,12 @@ def int_or_str(value):
         return value
 
 
-__version__ = "0.0.1"
+try:
+    __version__ = metadata.version("redis")
+except metadata.PackageNotFoundError:
+    __version__ = "99.99.99"
+
+
 VERSION = tuple(map(int_or_str, __version__.split(".")))
 
 __all__ = [
@@ -49,11 +86,29 @@ __all__ = [
     "PubSubError",
     "ReadOnlyError",
     "KeyDB",
+    "KeyDBCluster",
     "KeyDBError",
     "ResponseError",
+    "Sentinel",
+    "SentinelConnectionPool",
+    "SentinelManagedConnection",
+    "SentinelManagedSSLConnection",
     "SSLConnection",
     "StrictKeyDB",
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",
+    # Async
+    "AsyncKeyDB", 
+    "StrictAsyncKeyDB",
+    "AsyncBlockingConnectionPool",
+    "AsyncConnection",
+    "AsyncConnectionPool",
+    "AsyncSSLConnection",
+    "AsyncUnixDomainSocketConnection",
+    "AsyncSentinel",
+    "AsyncSentinelConnectionPool",
+    "AsyncSentinelManagedConnection",
+    "AsyncSentinelManagedSSLConnection",
+    "async_from_url"
 ]

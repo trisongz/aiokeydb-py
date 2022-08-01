@@ -1,11 +1,18 @@
+import asyncio
 import random
 import weakref
-from aiokeydb.client import KeyDB
-from aiokeydb.commands import SentinelCommands
-from aiokeydb.connection import Connection, ConnectionPool, SSLConnection
+from typing import AsyncIterator, Iterable, Mapping, Sequence, Tuple, Type
+
+from aiokeydb.asyncio.client import AsyncKeyDB
+from aiokeydb.asyncio.connection import (
+    AsyncConnection,
+    AsyncConnectionPool,
+    EncodableT,
+    AsyncSSLConnection,
+)
+from aiokeydb.commands import AsyncSentinelCommands
 from aiokeydb.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError
 from aiokeydb.utils import str_if_bytes
-
 
 
 class MasterNotFoundError(ConnectionError):
@@ -16,46 +23,49 @@ class SlaveNotFoundError(ConnectionError):
     pass
 
 
-class SentinelManagedConnection(Connection):
+class AsyncSentinelManagedConnection(AsyncConnection):
     def __init__(self, **kwargs):
         self.connection_pool = kwargs.pop("connection_pool")
         super().__init__(**kwargs)
 
     def __repr__(self):
         pool = self.connection_pool
-        s = f"{type(self).__name__}<service={pool.service_name}%s>"
+        s = f"{self.__class__.__name__}<service={pool.service_name}"
         if self.host:
             host_info = f",host={self.host},port={self.port}"
-            s = s % host_info
-        return s
+            s += host_info
+        return s + ">"
 
-    def connect_to(self, address):
+    async def connect_to(self, address):
         self.host, self.port = address
-        super().connect()
+        await super().connect()
         if self.connection_pool.check_connection:
-            self.send_command("PING")
-            if str_if_bytes(self.read_response()) != "PONG":
+            await self.send_command("PING")
+            if str_if_bytes(await self.read_response()) != "PONG":
                 raise ConnectionError("PING failed")
 
-    def _connect_retry(self):
-        if self._sock:
+    async def _connect_retry(self):
+        if self._reader:
             return  # already connected
         if self.connection_pool.is_master:
-            self.connect_to(self.connection_pool.get_master_address())
+            await self.connect_to(await self.connection_pool.get_master_address())
         else:
-            for slave in self.connection_pool.rotate_slaves():
+            async for slave in self.connection_pool.rotate_slaves():
                 try:
-                    return self.connect_to(slave)
+                    return await self.connect_to(slave)
                 except ConnectionError:
                     continue
             raise SlaveNotFoundError  # Never be here
 
-    def connect(self):
-        return self.retry.call_with_retry(self._connect_retry, lambda error: None)
+    async def connect(self):
+        return await self.retry.call_with_retry(
+            self._connect_retry,
+            lambda error: asyncio.sleep(0),
+        )
 
-    def read_response(self, disable_decoding=False):
+    async def read_response(self, disable_decoding: bool = False):
         try:
-            return super().read_response(disable_decoding=disable_decoding)
+            return await super().read_response(disable_decoding=disable_decoding)
         except ReadOnlyError:
             if self.connection_pool.is_master:
                 # When talking to a master, a ReadOnlyError when likely
@@ -63,18 +73,18 @@ class SentinelManagedConnection(Connection):
                 # to has been demoted to a slave and there's a new master.
                 # calling disconnect will force the connection to re-query
                 # sentinel during the next connect() attempt.
-                self.disconnect()
+                await self.disconnect()
                 raise ConnectionError("The previous master is now a slave")
             raise
 
 
-class SentinelManagedSSLConnection(SentinelManagedConnection, SSLConnection):
+class AsyncSentinelManagedSSLConnection(AsyncSentinelManagedConnection, AsyncSSLConnection):
     pass
 
 
-class SentinelConnectionPool(ConnectionPool):
+class AsyncSentinelConnectionPool(AsyncConnectionPool):
     """
-    Sentinel backed connection pool.
+    AsyncSentinel backed connection pool.
 
     If ``check_connection`` flag is set to True, SentinelManagedConnection
     sends a PING command right after establishing the connection.
@@ -83,9 +93,9 @@ class SentinelConnectionPool(ConnectionPool):
     def __init__(self, service_name, sentinel_manager, **kwargs):
         kwargs["connection_class"] = kwargs.get(
             "connection_class",
-            SentinelManagedSSLConnection
+            AsyncSentinelManagedSSLConnection
             if kwargs.pop("ssl", False)
-            else SentinelManagedConnection,
+            else AsyncSentinelManagedConnection,
         )
         self.is_master = kwargs.pop("is_master", True)
         self.check_connection = kwargs.pop("check_connection", False)
@@ -93,36 +103,39 @@ class SentinelConnectionPool(ConnectionPool):
         self.connection_kwargs["connection_pool"] = weakref.proxy(self)
         self.service_name = service_name
         self.sentinel_manager = sentinel_manager
+        self.master_address = None
+        self.slave_rr_counter = None
 
     def __repr__(self):
-        role = "master" if self.is_master else "slave"
-        return f"{type(self).__name__}<service={self.service_name}({role})"
+        return (
+            f"{self.__class__.__name__}"
+            f"<service={self.service_name}({self.is_master and 'master' or 'slave'})>"
+        )
 
     def reset(self):
         super().reset()
         self.master_address = None
         self.slave_rr_counter = None
 
-    def owns_connection(self, connection):
+    def owns_connection(self, connection: AsyncConnection):
         check = not self.is_master or (
             self.is_master and self.master_address == (connection.host, connection.port)
         )
-        parent = super()
-        return check and parent.owns_connection(connection)
+        return check and super().owns_connection(connection)
 
-    def get_master_address(self):
-        master_address = self.sentinel_manager.discover_master(self.service_name)
+    async def get_master_address(self):
+        master_address = await self.sentinel_manager.discover_master(self.service_name)
         if self.is_master:
             if self.master_address != master_address:
                 self.master_address = master_address
                 # disconnect any idle connections so that they reconnect
                 # to the new master the next time that they are used.
-                self.disconnect(inuse_connections=False)
+                await self.disconnect(inuse_connections=False)
         return master_address
 
-    def rotate_slaves(self):
-        "Round-robin slave balancer"
-        slaves = self.sentinel_manager.discover_slaves(self.service_name)
+    async def rotate_slaves(self) -> AsyncIterator:
+        """Round-robin slave balancer"""
+        slaves = await self.sentinel_manager.discover_slaves(self.service_name)
         if slaves:
             if self.slave_rr_counter is None:
                 self.slave_rr_counter = random.randint(0, len(slaves) - 1)
@@ -132,22 +145,22 @@ class SentinelConnectionPool(ConnectionPool):
                 yield slave
         # Fallback to the master connection
         try:
-            yield self.get_master_address()
+            yield await self.get_master_address()
         except MasterNotFoundError:
             pass
         raise SlaveNotFoundError(f"No slave found for {self.service_name!r}")
 
 
-class Sentinel(SentinelCommands):
+class AsyncSentinel(AsyncSentinelCommands):
     """
-    KeyDB Sentinel cluster client
+    AsyncKeyDB Sentinel cluster client
 
     >>> from redis.sentinel import Sentinel
     >>> sentinel = Sentinel([('localhost', 26379)], socket_timeout=0.1)
     >>> master = sentinel.master_for('mymaster', socket_timeout=0.1)
-    >>> master.set('foo', 'bar')
+    >>> await master.set('foo', 'bar')
     >>> slave = sentinel.slave_for('mymaster', socket_timeout=0.1)
-    >>> slave.get('foo')
+    >>> await slave.get('foo')
     b'bar'
 
     ``sentinels`` is a list of sentinel nodes. Each node is represented by
@@ -159,12 +172,12 @@ class Sentinel(SentinelCommands):
 
     ``sentinel_kwargs`` is a dictionary of connection arguments used when
     connecting to sentinel instances. Any argument that can be passed to
-    a normal KeyDB connection can be specified here. If ``sentinel_kwargs`` is
+    a normal AsyncKeyDB connection can be specified here. If ``sentinel_kwargs`` is
     not specified, any socket_timeout and socket_keepalive options specified
     in ``connection_kwargs`` will be used.
 
     ``connection_kwargs`` are keyword arguments that will be used when
-    establishing a connection to a KeyDB server.
+    establishing a connection to a AsyncKeyDB server.
     """
 
     def __init__(
@@ -183,38 +196,42 @@ class Sentinel(SentinelCommands):
         self.sentinel_kwargs = sentinel_kwargs
 
         self.sentinels = [
-            KeyDB(hostname, port, **self.sentinel_kwargs)
+            AsyncKeyDB(host=hostname, port=port, **self.sentinel_kwargs)
             for hostname, port in sentinels
         ]
         self.min_other_sentinels = min_other_sentinels
         self.connection_kwargs = connection_kwargs
 
-    def execute_command(self, *args, **kwargs):
+    async def execute_command(self, *args, **kwargs):
         """
         Execute Sentinel command in sentinel nodes.
         once - If set to True, then execute the resulting command on a single
-        node at random, rather than across the entire sentinel cluster.
+               node at random, rather than across the entire sentinel cluster.
         """
         once = bool(kwargs.get("once", False))
         if "once" in kwargs.keys():
             kwargs.pop("once")
 
         if once:
-            for sentinel in self.sentinels:
-                sentinel.execute_command(*args, **kwargs)
+            tasks = [
+                asyncio.Task(sentinel.execute_command(*args, **kwargs))
+                for sentinel in self.sentinels
+            ]
+            await asyncio.gather(*tasks)
         else:
-            random.choice(self.sentinels).execute_command(*args, **kwargs)
+            await random.choice(self.sentinels).execute_command(*args, **kwargs)
         return True
 
     def __repr__(self):
         sentinel_addresses = []
         for sentinel in self.sentinels:
             sentinel_addresses.append(
-                "{host}:{port}".format_map(sentinel.connection_pool.connection_kwargs)
+                f"{sentinel.connection_pool.connection_kwargs['host']}:"
+                f"{sentinel.connection_pool.connection_kwargs['port']}"
             )
-        return f'{type(self).__name__}<sentinels=[{",".join(sentinel_addresses)}]>'
+        return f"{self.__class__.__name__}<sentinels=[{','.join(sentinel_addresses)}]>"
 
-    def check_master_state(self, state, service_name):
+    def check_master_state(self, state: dict, service_name: str) -> bool:
         if not state["is_master"] or state["is_sdown"] or state["is_odown"]:
             return False
         # Check if our sentinel doesn't see other nodes
@@ -222,9 +239,9 @@ class Sentinel(SentinelCommands):
             return False
         return True
 
-    def discover_master(self, service_name):
+    async def discover_master(self, service_name: str):
         """
-        Asks sentinel servers for the KeyDB master's address corresponding
+        Asks sentinel servers for the AsyncKeyDB master's address corresponding
         to the service labeled ``service_name``.
 
         Returns a pair (address, port) or raises MasterNotFoundError if no
@@ -232,7 +249,7 @@ class Sentinel(SentinelCommands):
         """
         for sentinel_no, sentinel in enumerate(self.sentinels):
             try:
-                masters = sentinel.sentinel_masters()
+                masters = await sentinel.sentinel_masters()
             except (ConnectionError, TimeoutError):
                 continue
             state = masters.get(service_name)
@@ -245,8 +262,10 @@ class Sentinel(SentinelCommands):
                 return state["ip"], state["port"]
         raise MasterNotFoundError(f"No master found for {service_name!r}")
 
-    def filter_slaves(self, slaves):
-        "Remove slaves that are in an ODOWN or SDOWN state"
+    def filter_slaves(
+        self, slaves: Iterable[Mapping]
+    ) -> Sequence[Tuple[EncodableT, EncodableT]]:
+        """Remove slaves that are in an ODOWN or SDOWN state"""
         slaves_alive = []
         for slave in slaves:
             if slave["is_odown"] or slave["is_sdown"]:
@@ -254,11 +273,13 @@ class Sentinel(SentinelCommands):
             slaves_alive.append((slave["ip"], slave["port"]))
         return slaves_alive
 
-    def discover_slaves(self, service_name):
-        "Returns a list of alive slaves for service ``service_name``"
+    async def discover_slaves(
+        self, service_name: str
+    ) -> Sequence[Tuple[EncodableT, EncodableT]]:
+        """Returns a list of alive slaves for service ``service_name``"""
         for sentinel in self.sentinels:
             try:
-                slaves = sentinel.sentinel_slaves(service_name)
+                slaves = await sentinel.sentinel_slaves(service_name)
             except (ConnectionError, ResponseError, TimeoutError):
                 continue
             slaves = self.filter_slaves(slaves)
@@ -268,9 +289,9 @@ class Sentinel(SentinelCommands):
 
     def master_for(
         self,
-        service_name,
-        keydb_class=KeyDB,
-        connection_pool_class=SentinelConnectionPool,
+        service_name: str,
+        keydb_class: Type[AsyncKeyDB] = AsyncKeyDB,
+        connection_pool_class: Type[AsyncSentinelConnectionPool] = AsyncSentinelConnectionPool,
         **kwargs,
     ):
         """
@@ -283,7 +304,7 @@ class Sentinel(SentinelCommands):
         NOTE: If the master's address has changed, any cached connections to
         the old master are closed.
 
-        By default clients will be a :py:class:`~redis.KeyDB` instance.
+        By default clients will be a :py:class:`~redis.AsyncKeyDB` instance.
         Specify a different class to the ``keydb_class`` argument if you
         desire something different.
 
@@ -293,7 +314,7 @@ class Sentinel(SentinelCommands):
 
         All other keyword arguments are merged with any connection_kwargs
         passed to this class and passed to the connection pool as keyword
-        arguments to be used to initialize KeyDB connections.
+        arguments to be used to initialize AsyncKeyDB connections.
         """
         kwargs["is_master"] = True
         connection_kwargs = dict(self.connection_kwargs)
@@ -306,9 +327,9 @@ class Sentinel(SentinelCommands):
 
     def slave_for(
         self,
-        service_name,
-        keydb_class=KeyDB,
-        connection_pool_class=SentinelConnectionPool,
+        service_name: str,
+        keydb_class: Type[AsyncKeyDB] = AsyncKeyDB,
+        connection_pool_class: Type[AsyncSentinelConnectionPool] = AsyncSentinelConnectionPool,
         **kwargs,
     ):
         """
@@ -317,7 +338,7 @@ class Sentinel(SentinelCommands):
         A SentinelConnectionPool class is used to retrieve the slave's
         address before establishing a new connection.
 
-        By default clients will be a :py:class:`~redis.KeyDB` instance.
+        By default clients will be a :py:class:`~redis.AsyncKeyDB` instance.
         Specify a different class to the ``keydb_class`` argument if you
         desire something different.
 
@@ -326,7 +347,7 @@ class Sentinel(SentinelCommands):
 
         All other keyword arguments are merged with any connection_kwargs
         passed to this class and passed to the connection pool as keyword
-        arguments to be used to initialize KeyDB connections.
+        arguments to be used to initialize AsyncKeyDB connections.
         """
         kwargs["is_master"] = False
         connection_kwargs = dict(self.connection_kwargs)
