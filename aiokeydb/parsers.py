@@ -1,4 +1,4 @@
-from redis.client import CaseInsensitiveDict, timestamp_to_datetime
+from aiokeydb.client import CaseInsensitiveDict, timestamp_to_datetime
 from aiokeydb.exceptions import (
     ModuleError,
 )
