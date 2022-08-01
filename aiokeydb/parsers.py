@@ -1,12 +1,52 @@
-from aiokeydb.client import CaseInsensitiveDict, timestamp_to_datetime
+import datetime
 from aiokeydb.exceptions import (
     ModuleError,
 )
 from .utils import str_if_bytes
 
 
+def timestamp_to_datetime(response):
+    "Converts a unix timestamp to a Python datetime object"
+    if not response:
+        return None
+    try:
+        response = int(response)
+    except ValueError:
+        return None
+    return datetime.datetime.fromtimestamp(response)
+
+
 def string_keys_to_dict(key_string, callback):
     return dict.fromkeys(key_string.split(), callback)
+
+
+
+class CaseInsensitiveDict(dict):
+    "Case insensitive dict implementation. Assumes string keys only."
+
+    def __init__(self, data):
+        for k, v in data.items():
+            self[k.upper()] = v
+
+    def __contains__(self, k):
+        return super().__contains__(k.upper())
+
+    def __delitem__(self, k):
+        super().__delitem__(k.upper())
+
+    def __getitem__(self, k):
+        return super().__getitem__(k.upper())
+
+    def get(self, k, default=None):
+        return super().get(k.upper(), default)
+
+    def __setitem__(self, k, v):
+        super().__setitem__(k.upper(), v)
+
+    def update(self, data):
+        data = CaseInsensitiveDict(data)
+        super().update(data)
+
 
 def parse_debug_object(response):
     "Parse the results of Redis's DEBUG OBJECT command into a Python dict"
