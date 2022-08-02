@@ -1318,7 +1318,7 @@ def parse_url(url: str) -> ConnectKwargs:
             kwargs["path"] = unquote(parsed.path)
         kwargs["connection_class"] = AsyncUnixDomainSocketConnection
 
-    elif url.scheme in {"keydb", "keydbs", "redis", "rediss"}:
+    elif parsed.scheme in {"keydb", "keydbs", "redis", "rediss"}:
         if parsed.hostname:
             kwargs["host"] = unquote(parsed.hostname)
         if parsed.port:
@@ -1332,7 +1332,7 @@ def parse_url(url: str) -> ConnectKwargs:
             except (AttributeError, ValueError):
                 pass
 
-        if parsed.scheme == "rediss":
+        if parsed.scheme in {"keydbs", "rediss"}:
             kwargs["connection_class"] = AsyncSSLConnection
     else:
         valid_schemes = "keydb://, keydbs://, redis://, rediss://, unix://"

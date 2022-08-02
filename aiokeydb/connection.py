@@ -1206,7 +1206,7 @@ def parse_url(url):
             except (AttributeError, ValueError):
                 pass
 
-        if url.scheme == "rediss":
+        if url.scheme in {"keydbs", "rediss"}:
             kwargs["connection_class"] = SSLConnection
     else:
         raise ValueError(
