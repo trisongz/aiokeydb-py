@@ -1020,8 +1020,7 @@ class SSLConnection(Connection):
         # validation for the stapled case
         if self.ssl_validate_ocsp_stapled:
             import OpenSSL
-
-            from redis.ocsp import ocsp_staple_verifier
+            from aiokeydb.ocsp import ocsp_staple_verifier
 
             # if a context is provided use it - otherwise, a basic context
             if self.ssl_ocsp_context is None:
@@ -1045,7 +1044,7 @@ class SSLConnection(Connection):
 
         # pure ocsp validation
         if self.ssl_validate_ocsp is True and CRYPTOGRAPHY_AVAILABLE:
-            from redis.ocsp import OCSPVerifier
+            from aiokeydb.ocsp import OCSPVerifier
 
             o = OCSPVerifier(sslsock, self.host, self.port, self.ca_certs)
             if o.is_valid():

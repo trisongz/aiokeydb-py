@@ -24,3 +24,4 @@ aiokeydb/lock/scripts.py
 aiokeydb/mutex/__init__.py
 aiokeydb/mutex/_keydb.py
 aiokeydb/mutex/errors.py
+aiokeydb/aiokeydb-py.code-workspace

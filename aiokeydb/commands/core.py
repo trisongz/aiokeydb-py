@@ -1349,7 +1349,7 @@ class BitFieldOperation:
 
     def __init__(
         self,
-        client: Union["Redis", "AsyncRedis"],
+        client: Union["KeyDB", "AsyncKeyDB"],
         key: str,
         default_overflow: Union[str, None] = None,
     ):
@@ -1493,7 +1493,7 @@ class BasicKeyCommands(CommandsProtocol):
         return self.execute_command("BITCOUNT", *params)
 
     def bitfield(
-        self: Union["Redis", "AsyncRedis"],
+        self: Union["KeyDB", "AsyncKeyDB"],
         key: KeyT,
         default_overflow: Union[str, None] = None,
     ) -> BitFieldOperation:
@@ -4905,7 +4905,7 @@ class Script:
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "Redis", script: ScriptTextT):
+    def __init__(self, registered_client: "KeyDB", script: ScriptTextT):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -4921,7 +4921,7 @@ class Script:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["Redis", None] = None,
+        client: Union["KeyDB", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -4950,7 +4950,7 @@ class AsyncScript:
     An executable Lua script object returned by ``register_script``
     """
 
-    def __init__(self, registered_client: "AsyncRedis", script: ScriptTextT):
+    def __init__(self, registered_client: "AsyncKeyDB", script: ScriptTextT):
         self.registered_client = registered_client
         self.script = script
         # Precalculate and store the SHA1 hex digest of the script.
@@ -4966,7 +4966,7 @@ class AsyncScript:
         self,
         keys: Union[Sequence[KeyT], None] = None,
         args: Union[Iterable[EncodableT], None] = None,
-        client: Union["AsyncRedis", None] = None,
+        client: Union["AsyncKeyDB", None] = None,
     ):
         """Execute the script, passing any required ``args``"""
         keys = keys or []
@@ -4975,9 +4975,10 @@ class AsyncScript:
             client = self.registered_client
         args = tuple(keys) + tuple(args)
         # make sure the Redis server knows about the script
-        from redis.asyncio.client import Pipeline
+        #from redis.asyncio.client import Pipeline
+        from aiokeydb.asyncio.client import AsyncPipeline
 
-        if isinstance(client, Pipeline):
+        if isinstance(client, AsyncPipeline):
             # Make sure the pipeline can register the script before executing.
             client.scripts.add(self)
         try:
@@ -5163,7 +5164,7 @@ class ScriptCommands(CommandsProtocol):
         """
         return self.execute_command("SCRIPT LOAD", script)
 
-    def register_script(self: "Redis", script: ScriptTextT) -> Script:
+    def register_script(self: "KeyDB", script: ScriptTextT) -> Script:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
@@ -5177,7 +5178,7 @@ class AsyncScriptCommands(ScriptCommands):
     async def script_debug(self, *args) -> None:
         return super().script_debug()
 
-    def register_script(self: "AsyncRedis", script: ScriptTextT) -> AsyncScript:
+    def register_script(self: "AsyncKeyDB", script: ScriptTextT) -> AsyncScript:
         """
         Register a Lua ``script`` specifying the ``keys`` it will touch.
         Returns a Script object that is callable and hides the complexity of
