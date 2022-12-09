@@ -5,10 +5,10 @@ from distutils.util import strtobool
 # from prettytable import PrettyTable
 from aiokeydb.exceptions import ResponseError
 
-from .edge import Edge
-from .exceptions import VersionMismatchException
-from .node import Node
-from .path import Path
+from aiokeydb.commands.graph.edge import Edge
+from aiokeydb.commands.graph.exceptions import VersionMismatchException
+from aiokeydb.commands.graph.node import Node
+from aiokeydb.commands.graph.path import Path
 
 LABELS_ADDED = "Labels added"
 LABELS_REMOVED = "Labels removed"

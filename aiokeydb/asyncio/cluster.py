@@ -16,7 +16,7 @@ from typing import (
     Union,
 )
 from aiokeydb.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot
-from aiokeydb.asyncio.client import ResponseCallbackT
+from aiokeydb.asyncio.core import ResponseCallbackT
 from aiokeydb.asyncio.connection import (
     AsyncConnection,
     DefaultParser,
@@ -25,7 +25,7 @@ from aiokeydb.asyncio.connection import (
     parse_url,
 )
 from aiokeydb.asyncio.parser import CommandsParser
-from aiokeydb.client import EMPTY_RESPONSE, NEVER_DECODE, AbstractKeyDB
+from aiokeydb.core import EMPTY_RESPONSE, NEVER_DECODE, AbstractKeyDB
 from aiokeydb.cluster import (
     PIPELINE_BLOCKED_COMMANDS,
     PRIMARY,

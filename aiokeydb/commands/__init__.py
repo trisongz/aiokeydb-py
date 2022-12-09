@@ -1,9 +1,11 @@
-from .cluster import READ_COMMANDS, AsyncKeyDBClusterCommands, KeyDBClusterCommands
-from .core import AsyncCoreCommands, CoreCommands
-from .helpers import list_or_args
-from .parser import CommandsParser
-from .redismodules import AsyncRedisModuleCommands, RedisModuleCommands
-from .sentinel import AsyncSentinelCommands, SentinelCommands
+from __future__ import absolute_import
+
+from aiokeydb.commands.cluster import READ_COMMANDS, AsyncKeyDBClusterCommands, KeyDBClusterCommands
+from aiokeydb.commands.core import AsyncCoreCommands, CoreCommands
+from aiokeydb.commands.helpers import list_or_args
+from aiokeydb.commands.parser import CommandsParser
+from aiokeydb.commands.redismodules import AsyncRedisModuleCommands, RedisModuleCommands
+from aiokeydb.commands.sentinel import AsyncSentinelCommands, SentinelCommands
 
 __all__ = [
     "AsyncCoreCommands",

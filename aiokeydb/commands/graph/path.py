@@ -1,5 +1,5 @@
-from .edge import Edge
-from .node import Node
+from aiokeydb.commands.graph.edge import Edge
+from aiokeydb.commands.graph.node import Node
 
 
 class Path:

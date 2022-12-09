@@ -1,4 +1,4 @@
-from .aggregation import Reducer, SortDirection
+from aiokeydb.commands.search.aggregation import Reducer, SortDirection
 
 
 class FieldOnlyReducer(Reducer):

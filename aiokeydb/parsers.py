@@ -2,7 +2,7 @@ import datetime
 from aiokeydb.exceptions import (
     ModuleError,
 )
-from .utils import str_if_bytes
+from aiokeydb.utils import str_if_bytes
 
 
 def timestamp_to_datetime(response):

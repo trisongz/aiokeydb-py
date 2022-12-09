@@ -1,6 +1,8 @@
+from __future__ import absolute_import
+
 import sys
 
-from aiokeydb.client import KeyDB, StrictKeyDB
+from aiokeydb.core import KeyDB, StrictKeyDB
 from aiokeydb.cluster import KeyDBCluster
 from aiokeydb.connection import (
     BlockingConnectionPool,
@@ -49,6 +51,12 @@ from aiokeydb.asyncio import (
     async_from_url
 )
 
+# Handle Client
+
+from aiokeydb.client.serializers import SerializerType
+from aiokeydb.client.config import KeyDBSettings
+from aiokeydb.client.schemas.session import KeyDBSession
+from aiokeydb.client.core import KeyDBClient
 
 if sys.version_info >= (3, 8):
     from importlib import metadata
@@ -64,7 +72,7 @@ def int_or_str(value):
 
 
 try:
-    __version__ = metadata.version("redis")
+    __version__ = metadata.version("aiokeydb")
 except metadata.PackageNotFoundError:
     __version__ = "99.99.99"
 
@@ -110,5 +118,11 @@ __all__ = [
     "AsyncSentinelConnectionPool",
     "AsyncSentinelManagedConnection",
     "AsyncSentinelManagedSSLConnection",
-    "async_from_url"
+    "async_from_url",
+
+    # Client
+    "SerializerType",
+    "KeyDBSettings",
+    "KeyDBSession",
+    "KeyDBClient",
 ]

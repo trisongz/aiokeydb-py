@@ -1,4 +1,4 @@
-from ._util import to_string
+from aiokeydb.commands.search._util import to_string
 
 
 class Suggestion:

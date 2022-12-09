@@ -1,7 +1,7 @@
 import copy
 import re
 
-from ..helpers import nativestr
+from aiokeydb.commands.helpers import nativestr
 
 
 def bulk_of_jsons(d):

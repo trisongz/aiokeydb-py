@@ -1,5 +1,5 @@
-from ._util import to_string
-from .document import Document
+from aiokeydb.commands.search._util import to_string
+from aiokeydb.commands.search.document import Document
 
 
 class Result:

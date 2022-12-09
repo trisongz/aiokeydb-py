@@ -1,7 +1,9 @@
+from __future__ import absolute_import
+
 import aiokeydb
 
-from ..helpers import parse_to_list
-from .commands import (
+from aiokeydb.commands.helpers import parse_to_list
+from aiokeydb.commands.timeseries.commands import (
     ALTER_CMD,
     CREATE_CMD,
     CREATERULE_CMD,
@@ -17,8 +19,8 @@ from .commands import (
     REVRANGE_CMD,
     TimeSeriesCommands,
 )
-from .info import TSInfo
-from .utils import parse_get, parse_m_get, parse_m_range, parse_range
+from aiokeydb.commands.timeseries.info import TSInfo
+from aiokeydb.commands.timeseries.utils import parse_get, parse_m_get, parse_m_range, parse_range
 
 
 class TimeSeries(TimeSeriesCommands):

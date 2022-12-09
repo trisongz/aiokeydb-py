@@ -1,7 +1,9 @@
+from __future__ import absolute_import
+
 import aiokeydb
 
-from ...asyncio.client import AsyncPipeline
-from .commands import AsyncSearchCommands, SearchCommands
+from aiokeydb.asyncio.core import AsyncPipeline
+from aiokeydb.commands.search.commands import AsyncSearchCommands, SearchCommands
 
 
 class Search(SearchCommands):

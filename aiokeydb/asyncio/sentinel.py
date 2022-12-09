@@ -3,7 +3,7 @@ import random
 import weakref
 from typing import AsyncIterator, Iterable, Mapping, Sequence, Tuple, Type
 
-from aiokeydb.asyncio.client import AsyncKeyDB
+from aiokeydb.asyncio.core import AsyncKeyDB
 from aiokeydb.asyncio.connection import (
     AsyncConnection,
     AsyncConnectionPool,

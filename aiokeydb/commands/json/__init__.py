@@ -1,10 +1,12 @@
+from __future__ import absolute_import
+
 from json import JSONDecodeError, JSONDecoder, JSONEncoder
 
 import aiokeydb
 
-from ..helpers import nativestr
-from .commands import JSONCommands
-from .decoders import bulk_of_jsons, decode_list
+from aiokeydb.commands.helpers import nativestr
+from aiokeydb.commands.json.commands import JSONCommands
+from aiokeydb.commands.json.decoders import bulk_of_jsons, decode_list
 
 
 class JSON(JSONCommands):

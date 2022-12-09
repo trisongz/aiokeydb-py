@@ -2,15 +2,15 @@ import itertools
 import time
 from typing import Dict, Optional, Union
 
-from aiokeydb.client import Pipeline
+from aiokeydb.core import Pipeline
 
-from ..helpers import parse_to_dict
-from ._util import to_string
-from .aggregation import AggregateRequest, AggregateResult, Cursor
-from .document import Document
-from .query import Query
-from .result import Result
-from .suggestion import SuggestionParser
+from aiokeydb.commands.helpers import parse_to_dict
+from aiokeydb.commands.search._util import to_string
+from aiokeydb.commands.search.aggregation import AggregateRequest, AggregateResult, Cursor
+from aiokeydb.commands.search.document import Document
+from aiokeydb.commands.search.query import Query
+from aiokeydb.commands.search.result import Result
+from aiokeydb.commands.search.suggestion import SuggestionParser
 
 NUMERIC = "NUMERIC"
 

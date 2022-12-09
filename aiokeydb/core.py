@@ -8,7 +8,7 @@ import threading
 import time
 import warnings
 from itertools import chain
-from .parsers import (
+from aiokeydb.parsers import (
     str_if_bytes,
     sort_return_tuples,
     parse_info,
@@ -73,8 +73,8 @@ from aiokeydb.exceptions import (
     TimeoutError,
     WatchError,
 )
-from .lock import Lock
-from .utils import safe_str
+from aiokeydb.lock import Lock
+from aiokeydb.utils import safe_str
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"

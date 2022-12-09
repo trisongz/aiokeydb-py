@@ -1,9 +1,8 @@
-
-
+from __future__ import absolute_import
 
 # Keep naming convention to explicitly include Async
 # to avoid confusion with the builtin sync Clients / modules
-from aiokeydb.asyncio.client import AsyncKeyDB, StrictAsyncKeyDB
+from aiokeydb.asyncio.core import AsyncKeyDB, StrictAsyncKeyDB
 from aiokeydb.asyncio.cluster import AsyncKeyDBCluster
 from aiokeydb.asyncio.connection import (
     AsyncBlockingConnectionPool,

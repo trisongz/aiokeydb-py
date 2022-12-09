@@ -7,7 +7,7 @@ import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple, Union
 
-from aiokeydb.client import CaseInsensitiveDict, PubSub, KeyDB, parse_scan
+from aiokeydb.core import CaseInsensitiveDict, PubSub, KeyDB, parse_scan
 from aiokeydb.commands import READ_COMMANDS, CommandsParser, KeyDBClusterCommands
 from aiokeydb.connection import ConnectionPool, DefaultParser, Encoder, parse_url
 from aiokeydb.crc import REDIS_CLUSTER_HASH_SLOTS, key_slot

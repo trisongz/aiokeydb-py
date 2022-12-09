@@ -1,8 +1,7 @@
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from aiokeydb.asyncio.client import AsyncPipeline, AsyncKeyDB
-    #from redis.asyncio.client import Pipeline, Redis
+    from aiokeydb.asyncio.core import AsyncPipeline, AsyncKeyDB
 
 
 def async_from_url(url, **kwargs):
@@ -12,7 +11,7 @@ def async_from_url(url, **kwargs):
     Will attempt to extract the database id from the path url fragment, if
     none is provided.
     """
-    from aiokeydb.asyncio.client import AsyncKeyDB
+    from aiokeydb.asyncio.core import AsyncKeyDB
 
     return AsyncKeyDB.from_url(url, **kwargs)
 

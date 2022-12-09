@@ -24,10 +24,10 @@ def from_url(url, asyncio: bool = False, **kwargs):
     none is provided.
     """
     if asyncio:
-        from aiokeydb.asyncio.client import AsyncKeyDB
+        from aiokeydb.asyncio.core import AsyncKeyDB
         return AsyncKeyDB.from_url(url, **kwargs)
     
-    from aiokeydb.client import KeyDB
+    from aiokeydb.core import KeyDB
     return KeyDB.from_url(url, **kwargs)
 
 

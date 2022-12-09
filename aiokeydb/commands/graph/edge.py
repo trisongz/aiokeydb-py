@@ -1,5 +1,5 @@
-from ..helpers import quote_string
-from .node import Node
+from aiokeydb.commands.helpers import quote_string
+from aiokeydb.commands.graph.node import Node
 
 
 class Edge:

@@ -25,7 +25,7 @@ from aiokeydb.typing import (
     PatternT,
 )
 
-from .core import (
+from aiokeydb.commands.core import (
     ACLCommands,
     AsyncACLCommands,
     AsyncDataAccessCommands,
@@ -39,8 +39,8 @@ from .core import (
     ResponseT,
     ScriptCommands,
 )
-from .helpers import list_or_args
-from .redismodules import RedisModuleCommands
+from aiokeydb.commands.helpers import list_or_args
+from aiokeydb.commands.redismodules import RedisModuleCommands
 
 if TYPE_CHECKING:
     from aiokeydb.asyncio.cluster import TargetNodesT

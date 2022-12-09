@@ -1,4 +1,4 @@
-from ..helpers import nativestr
+from aiokeydb.commands.helpers import nativestr
 
 
 def list_to_dict(aList):

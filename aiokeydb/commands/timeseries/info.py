@@ -1,5 +1,5 @@
-from ..helpers import nativestr
-from .utils import list_to_dict
+from aiokeydb.commands.helpers import nativestr
+from aiokeydb.commands.timeseries.utils import list_to_dict
 
 
 class TSInfo:

@@ -6,9 +6,9 @@ from deprecated import deprecated
 
 from aiokeydb.exceptions import DataError
 
-from ._util import JsonType
-from .decoders import decode_dict_keys
-from .path import Path
+from aiokeydb.commands.json._util import JsonType
+from aiokeydb.commands.json.decoders import decode_dict_keys
+from aiokeydb.commands.json.path import Path
 
 
 class JSONCommands:

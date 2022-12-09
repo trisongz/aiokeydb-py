@@ -44,11 +44,11 @@ from aiokeydb.typing import (
     ZScoreBoundT,
 )
 
-from .helpers import list_or_args
+from aiokeydb.commands.helpers import list_or_args
 
 if TYPE_CHECKING:
-    from aiokeydb.asyncio.client import AsyncKeyDB
-    from aiokeydb.client import KeyDB
+    from aiokeydb.asyncio.core import AsyncKeyDB
+    from aiokeydb.core import KeyDB
 
 ResponseT = Union[Awaitable, Any]
 

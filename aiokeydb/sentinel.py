@@ -1,6 +1,6 @@
 import random
 import weakref
-from aiokeydb.client import KeyDB
+from aiokeydb.core import KeyDB
 from aiokeydb.commands import SentinelCommands
 from aiokeydb.connection import Connection, ConnectionPool, SSLConnection
 from aiokeydb.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError

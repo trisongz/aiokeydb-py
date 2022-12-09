@@ -1,8 +1,8 @@
 from aiokeydb.exceptions import ResponseError, DataError
 
-from .exceptions import VersionMismatchException
-from .execution_plan import ExecutionPlan
-from .query_result import AsyncQueryResult, QueryResult
+from aiokeydb.commands.graph.exceptions import VersionMismatchException
+from aiokeydb.commands.graph.execution_plan import ExecutionPlan
+from aiokeydb.commands.graph.query_result import AsyncQueryResult, QueryResult
 
 PROFILE_CMD = "GRAPH.PROFILE"
 RO_QUERY_CMD = "GRAPH.RO_QUERY"
