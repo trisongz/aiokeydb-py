@@ -662,12 +662,15 @@ class KeyDBSession:
                     if _validate_requests:
                         copy_kwargs = kwargs.copy()
                         request = copy_kwargs.pop("request", None)
-                        headers = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
+                        headers: typing.Dict[str, str] = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
                         # Handle No-Cache
-                        if (headers and headers.get("Cache-Control", headers.get("X-Cache-Control", "")) in {"no-store", "no-cache"}):
-                            if include_cache_hit:
-                                return await func(*args, **kwargs), False
-                            return await func(*args, **kwargs)
+                        if headers is not None:
+                            for key in {"Cache-Control", "X-Cache-Control"}:
+                                if headers.get(key, headers.get(key.lower(), "")) in {"no-store", "no-cache"}:
+                                    if include_cache_hit:
+                                        return await func(*args, **kwargs), False
+                                    return await func(*args, **kwargs)
+                        
 
                     # Do the actual caching
                     key = wrapper.__cache_key__(*args, **kwargs)
@@ -724,10 +727,14 @@ class KeyDBSession:
                         request = copy_kwargs.pop("request", None)
                         headers = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
                         # Handle No-Cache
-                        if (headers and headers.get("Cache-Control", headers.get("X-Cache-Control", "")) in {"no-store", "no-cache"}):
-                            if include_cache_hit:
-                                return func(*args, **kwargs), False
-                            return func(*args, **kwargs)
+                        headers: typing.Dict[str, str] = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
+                        if headers is not None:
+                            for key in {"Cache-Control", "X-Cache-Control"}:
+                                if headers.get(key, headers.get(key.lower(), "")) in {"no-store", "no-cache"}:
+                                    if include_cache_hit:
+                                        return func(*args, **kwargs), False
+                                    return func(*args, **kwargs)
+
 
                     # Do the actual caching
                     key = wrapper.__cache_key__(*args, **kwargs)
