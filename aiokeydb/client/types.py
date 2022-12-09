@@ -7,8 +7,19 @@ import functools
 from pydantic import validator
 from pydantic import BaseSettings as _BaseSettings
 from pydantic import BaseModel as _BaseModel
+from pydantic.networks import AnyUrl, Parts
 
-__all__ = ['BaseModel', 'BaseSettings', 'validator', 'classproperty', 'lazyproperty', 'Constant', 'ENOVAL']
+__all__ = [
+    'BaseModel', 
+    'BaseSettings', 
+    'validator', 
+    'classproperty', 
+    'lazyproperty', 
+    'Constant', 
+    'ENOVAL', 
+    'KeyDBDsn',
+    'KeyDBUri',
+]
 
 _NotFound = object()
 
@@ -359,3 +370,81 @@ class BaseModel(_BaseModel):
         for k, v in kwargs.items():
             if not hasattr(self, k): continue
             setattr(self, k, v)
+
+
+class KeyDBDsn(AnyUrl):
+    __slots__ = ()
+    allowed_schemes = {'redis', 'rediss', 'keydb', 'keydbs'}
+    host_required = False
+
+    @staticmethod
+    def get_default_parts(parts: Parts) -> Parts:
+        return {
+            'domain': 'localhost' if not (parts['ipv4'] or parts['ipv6']) else '',
+            'port': '6379',
+            'path': '/0',
+        }
+
+class KeyDBUri(BaseModel):
+
+    dsn: KeyDBDsn
+
+    @lazyproperty
+    def host(self):
+        return self.dsn.host
+
+    @lazyproperty
+    def port(self):
+        return self.dsn.port
+
+    @lazyproperty
+    def path(self):
+        return self.dsn.path
+    
+    @lazyproperty
+    def username(self):
+        return self.dsn.user
+
+    @lazyproperty
+    def password(self):
+        return self.dsn.password
+
+    @lazyproperty
+    def db_id(self):
+        return int(self.dsn.path[1:]) if self.dsn.path else None
+
+    @lazyproperty
+    def ssl(self):
+        return self.dsn.scheme in {'rediss', 'keydbs'}
+
+    @lazyproperty
+    def uri(self):
+        return str(self.dsn)
+    
+    @lazyproperty
+    def connection(self):
+        return str(self.dsn)
+    
+    @lazyproperty
+    def uri_no_auth(self):
+        if self.has_auth:
+            return str(self.dsn).replace(f'{self.auth_str}', '***')
+        return str(self.dsn)
+    
+    @lazyproperty
+    def auth_str(self):
+        if self.dsn.user:
+            return f'{self.dsn.user}:{self.password}' if self.password else f'{self.dsn.user}'
+        return f':{self.dsn.password}' if self.dsn.password else ''
+
+    @lazyproperty
+    def has_auth(self):
+        return self.dsn.user or self.dsn.password
+
+    def __str__(self):
+        return self.uri_no_auth
+
+    def __repr__(self):
+        return f'<KeyDBUri {self.uri_no_auth}>'
+
+

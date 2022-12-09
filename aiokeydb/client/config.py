@@ -1,9 +1,10 @@
 import json
 import socket
 import contextlib
+import logging
 from typing import Optional, Dict, Any, Union, Type, Tuple
 
-from aiokeydb.client.types import BaseSettings, validator, lazyproperty
+from aiokeydb.client.types import BaseSettings, validator, lazyproperty, KeyDBUri
 from aiokeydb.client.serializers import SerializerType, BaseSerializer
 
 
@@ -40,6 +41,7 @@ class KeyDBSettings(BaseSettings):
 
     cache_ttl: Optional[int] = 60 * 60 * 24  # 1 day
     cache_prefix: Optional[str] = 'cache_'
+    cache_enabled: Optional[bool] = True
     
     serializer: Optional[Union[str, SerializerType]] = SerializerType.default
     db_mapping: Optional[Union[str, Dict[str, int]]] = _default_db_mapping
@@ -51,6 +53,8 @@ class KeyDBSettings(BaseSettings):
     encoding: Optional[str] = 'utf-8'
     encoding_errors: Optional[str] = 'strict'
     config_kwargs: Optional[Union[str, Dict[str, Any]]] = {}
+    
+    log_level: Optional[str] = 'INFO'
 
     class Config:
         case_sensitive = False
@@ -101,6 +105,13 @@ class KeyDBSettings(BaseSettings):
         if '://' in base:
             base = base.split('://', 1)[-1]
         return base
+
+    @property
+    def loglevel(self) -> int:
+        """
+        Returns the log level
+        """
+        return getattr(logging, self.log_level.upper(), logging.INFO)
 
     @lazyproperty
     def base_uri(self) -> str:
@@ -210,7 +221,7 @@ class KeyDBSettings(BaseSettings):
         password: str = None,
         protocol: str = None,
         with_auth: bool = True,
-    ) -> Tuple[str, int]:
+    ) -> KeyDBUri:
         """
         Creates a URI from the given parameters
         """
@@ -232,9 +243,8 @@ class KeyDBSettings(BaseSettings):
         else:
             if not db_id and name: db_id = self.db_mapping.get(name)
             db_id = db_id or self.db_id
-            return f'{uri}/{db_id}', db_id
         
-        return uri, db_id
+        return KeyDBUri(dsn = uri)
         
 
     def get_serializer(self) -> Type[BaseSerializer]:

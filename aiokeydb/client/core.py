@@ -10,7 +10,7 @@ from aiokeydb.asyncio.lock import AsyncLock
 from aiokeydb.asyncio.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
 
 from aiokeydb.client.config import KeyDBSettings
-from aiokeydb.client.types import classproperty
+from aiokeydb.client.types import classproperty, KeyDBUri
 
 from aiokeydb.client.schemas.session import KeyDBSession
 
@@ -21,27 +21,7 @@ class KeyDBClient:
     current: str = None
     encoder: typing.Type[Encoder] = None
     sessions: typing.Dict[str, KeyDBSession] = {}
-    settings: typing.Type[KeyDBSession] = None
-
-    @classmethod
-    async def aclose(cls):
-        for name, ctx in cls.sessions.items():
-            logger.info(f'Closing Session: {name}')
-            await ctx.aclose()
-        
-        cls.sessions = {}
-        cls.ctx = None
-        cls.current = None
-    
-    @classmethod
-    def close(cls):
-        for name, ctx in cls.sessions.items():
-            logger.info(f'Closing Session: {name}')
-            ctx.close()
-        
-        cls.sessions = {}
-        cls.ctx = None
-        cls.current = None
+    settings: typing.Type[KeyDBSettings] = None
 
     @classmethod
     def init_session(
@@ -55,6 +35,8 @@ class KeyDBClient:
         password: str = None,
         protocol: str = None,
         with_auth: bool = True,
+        set_current: bool = False,
+        cache_enabled: typing.Optional[bool] = None,
         **config,
     ):
         if name in cls.sessions:
@@ -66,7 +48,7 @@ class KeyDBClient:
             encoding_errors = cls.settings.encoding_errors,
             decode_responses = True,
         )
-        uri, db_id = cls.settings.create_uri(
+        uri: KeyDBUri = cls.settings.create_uri(
             name = name,
             uri = uri,
             host = host,
@@ -77,6 +59,7 @@ class KeyDBClient:
             protocol = protocol,
             with_auth = with_auth,
         )
+        db_id = uri.db_id
         config = cls.settings.get_config(
             **config,
         )
@@ -87,13 +70,30 @@ class KeyDBClient:
             serializer = cls.settings.get_serializer(),
             encoder = cls.encoder,
             settings = cls.settings,
+            cache_enabled = cache_enabled,
             **config,
         )
-        cls.sessions[name] = ctx
-        cls.ctx = ctx
-        cls.current = name
-        logger.info(f'Created Session: {name} ({uri})')
+        cls.sessions[name] = ctx    
+        logger.log(msg = f'Initialized Session: {name} ({uri})', level = cls.settings.loglevel)
+        if set_current or not cls.ctx:
+            cls.ctx = ctx
+            cls.current = name
+            logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
     
+    @classmethod
+    def set_session(
+        cls,
+        name: str = None,
+        **kwargs,
+    ):
+        if name not in cls.sessions:
+            return cls.init_session(name = name, set_current = True, **kwargs)
+        cls.ctx = cls.sessions[name]
+        cls.current = name
+        logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
+
+
+
     @classmethod
     def get_session(
         cls,
@@ -119,18 +119,18 @@ class KeyDBClient:
     @classproperty
     def keydb(cls) -> KeyDB:
         """
-        returns a `KeyDB`.
+        returns the underlying `KeyDB` client from within
+        the current session.
         """
         return cls.get_session().client
     
     @classproperty
     def async_keydb(cls) -> AsyncKeyDB:
         """
-        returns a `AsyncKeyDB`.
+        returns the underlying `AsyncKeyDB` client from within
+        the current session.
         """
         return cls.get_session().async_client
-    
-
 
     @classproperty
     def pubsub(cls) -> PubSub:
@@ -223,19 +223,6 @@ class KeyDBClient:
             thread_local = thread_local,
             _session = _session,
         )
-    
-    
-    def __enter__(self):
-        return self
-    
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()
-    
-    async def __aenter__(self):
-        return self
-    
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
-        await self.aclose()
     
 
     """
@@ -363,9 +350,9 @@ class KeyDBClient:
 
         equivilent to:
             key = 'mykey'; new_data = {'key2': 'value2'}
-            x = await KeyDBClient.get(key); -> x = {'key': 'value'}
+            x = KeyDBClient.get(key); -> x = {'key': 'value'}
             x.update(new_data); -> x.update({'key2': 'value2'})
-            await KeyDBClient.set(key, x); -> {'key': 'value', 'key2': 'value2'}
+            KeyDBClient.set(key, x); -> {'key': 'value', 'key2': 'value2'}
         """
         session = cls.get_session(_session)
         return session.update(
@@ -390,9 +377,9 @@ class KeyDBClient:
 
         equivilent to:
             key = 'mykey'; new_data = {'key2': 'value2'}
-            x = await KeyDBClient.get(key); -> x = {'key': 'value'}
+            x = await KeyDBClient.async_get(key); -> x = {'key': 'value'}
             x.update(new_data); -> x.update({'key2': 'value2'})
-            await KeyDBClient.set(key, x); -> {'key': 'value', 'key2': 'value2'}
+            await KeyDBClient.async_set(key, x); -> {'key': 'value', 'key2': 'value2'}
         """
         session = cls.get_session(_session)
         return await session.async_update(
@@ -419,7 +406,6 @@ class KeyDBClient:
             **kwargs
         )
 
-
     @classmethod
     async def async_exists(
         cls, 
@@ -435,10 +421,2862 @@ class KeyDBClient:
             keys = keys,
             **kwargs
         )
+    
+
+    @classmethod
+    def decr(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Decrement the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return session.decr(name, amount = amount, **kwargs)
+    
+    @classmethod
+    async def async_decr(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Decrement the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return await session.async_decr(name, amount = amount, **kwargs)
+    
+    @classmethod
+    def decrby(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Decrement the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return session.decrby(name, amount = amount, **kwargs)
+    
+    @classmethod
+    async def async_decrby(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Decrement the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return await session.async_decrby(name, amount = amount, **kwargs)
+    
+    @classmethod
+    def incr(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return session.incr(name, amount = amount, **kwargs)
+    
+    @classmethod
+    async def async_incr(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return await session.async_incr(name, amount = amount, **kwargs)
+    
+    @classmethod
+    def incrby(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return session.incrby(name, amount = amount, **kwargs)
+    
+    @classmethod
+    async def async_incrby(
+        cls,
+        name: str,
+        amount: typing.Optional[int] = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return await session.async_incrby(name, amount = amount, **kwargs)
+    
+    @classmethod
+    def incrbyfloat(
+        cls,
+        name: str,
+        amount: typing.Optional[float] = 1.0,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return session.incrbyfloat(name, amount = amount, **kwargs)
+    
+    @classmethod
+    async def async_incrbyfloat(
+        cls,
+        name: str,
+        amount: typing.Optional[float] = 1.0,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the value of key `name` by `amount`
+        """
+        session = cls.get_session(_session)
+        return await session.async_incrbyfloat(name, amount = amount, **kwargs)
+    
+    @classmethod
+    def getbit(
+        cls,
+        name: str,
+        offset: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Returns the bit value at offset in the string value stored at key
+        """
+        session = cls.get_session(_session)
+        return session.getbit(name, offset, **kwargs)
+    
+    @classmethod
+    async def async_getbit(
+        cls,
+        name: str,
+        offset: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Returns the bit value at offset in the string value stored at key
+        """
+        session = cls.get_session(_session)
+        return await session.async_getbit(name, offset, **kwargs)
+    
+    @classmethod
+    def setbit(
+        cls,
+        name: str,
+        offset: int,
+        value: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Sets or clears the bit at offset in the string value stored at key
+        """
+        session = cls.get_session(_session)
+        return session.setbit(name, offset, value, **kwargs)
+    
+    @classmethod
+    async def async_setbit(
+        cls,
+        name: str,
+        offset: int,
+        value: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Sets or clears the bit at offset in the string value stored at key
+        """
+        session = cls.get_session(_session)
+        return await session.async_setbit(name, offset, value, **kwargs)
+    
+    @classmethod
+    def bitcount(
+        cls,
+        name: str,
+        start: typing.Optional[int] = None,
+        end: typing.Optional[int] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Count the number of set bits (population counting) in a string
+        """
+        session = cls.get_session(_session)
+        return session.bitcount(name, start = start, end = end, **kwargs)
+    
+    @classmethod
+    async def async_bitcount(
+        cls,
+        name: str,
+        start: typing.Optional[int] = None,
+        end: typing.Optional[int] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Count the number of set bits (population counting) in a string
+        """
+        session = cls.get_session(_session)
+        return await session.async_bitcount(name, start = start, end = end, **kwargs)
+    
+    @classmethod
+    def bitop(
+        cls,
+        operation: str,
+        dest: str,
+        *keys: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Perform bitwise operations between strings
+        """
+        session = cls.get_session(_session)
+        return session.bitop(operation, dest, *keys, **kwargs)
+    
+    @classmethod
+    async def async_bitop(
+        cls,
+        operation: str,
+        dest: str,
+        *keys: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Perform bitwise operations between strings
+        """
+        session = cls.get_session(_session)
+        return await session.async_bitop(operation, dest, *keys, **kwargs)
+    
+    @classmethod
+    def bitpos(
+        cls,
+        name: str,
+        bit: int,
+        start: typing.Optional[int] = None,
+        end: typing.Optional[int] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Find first bit set or clear in a string
+        """
+        session = cls.get_session(_session)
+        return session.bitpos(name, bit, start = start, end = end, **kwargs)
+    
+    @classmethod
+    async def async_bitpos(
+        cls,
+        name: str,
+        bit: int,
+        start: typing.Optional[int] = None,
+        end: typing.Optional[int] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Find first bit set or clear in a string
+        """
+        session = cls.get_session(_session)
+        return await session.async_bitpos(name, bit, start = start, end = end, **kwargs)
+    
+    @classmethod
+    def strlen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of the value stored in a key
+        """
+        session = cls.get_session(_session)
+        return session.strlen(name, **kwargs)
+    
+    @classmethod
+    async def async_strlen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of the value stored in a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_strlen(name, **kwargs)
+    
+    @classmethod
+    def getrange(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Get a substring of the string stored at a key
+        """
+        session = cls.get_session(_session)
+        return session.getrange(name, start, end, **kwargs)
+    
+    @classmethod
+    async def async_getrange(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Get a substring of the string stored at a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_getrange(name, start, end, **kwargs)
+    
+    @classmethod
+    def setrange(
+        cls,
+        name: str,
+        offset: int,
+        value: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Overwrite part of a string at key starting at the specified offset
+        """
+        session = cls.get_session(_session)
+        return session.setrange(name, offset, value, **kwargs)
+    
+    @classmethod
+    async def async_setrange(
+        cls,
+        name: str,
+        offset: int,
+        value: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Overwrite part of a string at key starting at the specified offset
+        """
+        session = cls.get_session(_session)
+        return await session.async_setrange(name, offset, value, **kwargs)
+    
+    @classmethod
+    def getset(
+        cls,
+        name: str,
+        value: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Set the string value of a key and session = cls.get_session(_session)
+        return its old value
+        """
+        session = cls.get_session(_session)
+        return session.getset(name, value, **kwargs)
+
+    @classmethod
+    async def async_getset(
+        cls,
+        name: str,
+        value: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Set the string value of a key and session = cls.get_session(_session)
+        return its old value
+        """
+        session = cls.get_session(_session)
+        return await session.async_getset(name, value, **kwargs)
+    
+    @classmethod
+    def mget(
+        cls,
+        *names: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List[typing.Optional[str]]:
+        """
+        Get the values of all the given keys
+        """
+        session = cls.get_session(_session)
+        return session.mget(*names, **kwargs)
+    
+    @classmethod
+    async def async_mget(
+        cls,
+        *names: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List[typing.Optional[str]]:
+        """
+        Get the values of all the given keys
+        """
+        session = cls.get_session(_session)
+        return await session.async_mget(*names, **kwargs)
+    
+    @classmethod
+    def mset(
+        cls,
+        mapping: typing.Mapping[str, str],
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple keys to multiple values
+        """
+        session = cls.get_session(_session)
+        return session.mset(mapping, **kwargs)
+    
+    @classmethod
+    async def async_mset(
+        cls,
+        mapping: typing.Mapping[str, str],
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple keys to multiple values
+        """
+        session = cls.get_session(_session)
+        return await session.async_mset(mapping, **kwargs)
+    
+    @classmethod
+    def msetnx(
+        cls,
+        mapping: typing.Mapping[str, str],
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple keys to multiple values, only if none of the keys exist
+        """
+        session = cls.get_session(_session)
+        return session.msetnx(mapping, **kwargs)
+    
+    @classmethod
+    async def async_msetnx(
+        cls,
+        mapping: typing.Mapping[str, str],
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple keys to multiple values, only if none of the keys exist
+        """
+        session = cls.get_session(_session)
+        return await session.async_msetnx(mapping, **kwargs)
+    
+    @classmethod
+    def expire(
+        cls,
+        name: str,
+        time: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a key's time to live in seconds
+        """
+        session = cls.get_session(_session)
+        return session.expire(name, time, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    async def async_expire(
+        cls,
+        name: str,
+        time: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a key's time to live in seconds
+        """
+        session = cls.get_session(_session)
+        return await session.async_expire(name, time, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    def expireat(
+        cls,
+        name: str,
+        when: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the expiration for a key as a UNIX timestamp
+        """
+        session = cls.get_session(_session)
+        return session.expireat(name, when, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    async def async_expireat(
+        cls,
+        name: str,
+        when: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the expiration for a key as a UNIX timestamp
+        """
+        session = cls.get_session(_session)
+        return await session.async_expireat(name, when, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    def pexpire(
+        cls,
+        name: str,
+        time: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a key's time to live in milliseconds
+        """
+        session = cls.get_session(_session)
+        return session.pexpire(name, time, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    async def async_pexpire(
+        cls,
+        name: str,
+        time: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a key's time to live in milliseconds
+        """
+        session = cls.get_session(_session)
+        return await session.async_pexpire(name, time, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    def pexpireat(
+        cls,
+        name: str,
+        when: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the expiration for a key as a UNIX timestamp specified in milliseconds
+        """
+        session = cls.get_session(_session)
+        return session.pexpireat(name, when, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    async def async_pexpireat(
+        cls,
+        name: str,
+        when: int,
+        nx: bool = False,
+        xx: bool = False,
+        gt: bool = False,
+        lt: bool = False,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the expiration for a key as a UNIX timestamp specified in milliseconds
+        """
+        session = cls.get_session(_session)
+        return await session.async_pexpireat(name, when, nx = nx, xx = xx, gt = gt, lt = lt, **kwargs)
+    
+    @classmethod
+    def ttl(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the time to live for a key
+        """
+        session = cls.get_session(_session)
+        return session.ttl(name, **kwargs)
+    
+    @classmethod
+    async def async_ttl(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the time to live for a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_ttl(name, **kwargs)
+    
+    @classmethod
+    def pttl(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the time to live for a key in milliseconds
+        """
+        session = cls.get_session(_session)
+        return session.pttl(name, **kwargs)
+    
+    @classmethod
+    async def async_pttl(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the time to live for a key in milliseconds
+        """
+        session = cls.get_session(_session)
+        return await session.async_pttl(name, **kwargs)
+    
+    @classmethod
+    def persist(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Remove the expiration from a key
+        """
+        session = cls.get_session(_session)
+        return session.persist(name, **kwargs)
+    
+    @classmethod
+    async def async_persist(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Remove the expiration from a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_persist(name, **kwargs)
+    
+    @classmethod
+    def psetex(
+        cls,
+        name: str,
+        time_ms: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value and expiration in milliseconds of a key
+        """
+        session = cls.get_session(_session)
+        return session.psetex(name, time_ms, value, **kwargs)
+    
+    @classmethod
+    async def async_psetex(
+        cls,
+        name: str,
+        time_ms: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value and expiration in milliseconds of a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_psetex(name, time_ms, value, **kwargs)
+    
+    @classmethod
+    def setex(
+        cls,
+        name: str,
+        time: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value and expiration of a key
+        """
+        session = cls.get_session(_session)
+        return session.setex(name, time, value, **kwargs)
+    
+    @classmethod
+    async def async_setex(
+        cls,
+        name: str,
+        time: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value and expiration of a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_setex(name, time, value, **kwargs)
+    
+    @classmethod
+    def getdel(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get the value of a key and delete it
+        """
+        session = cls.get_session(_session)
+        return session.getdel(name, **kwargs)
+    
+    @classmethod
+    async def async_getdel(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get the value of a key and delete it
+        """
+        session = cls.get_session(_session)
+        return await session.async_getdel(name, **kwargs)
+    
+    @classmethod
+    def hdel(
+        cls,
+        name: str,
+        *keys: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Delete one or more hash fields
+        """
+        session = cls.get_session(_session)
+        return session.hdel(name, *keys, **kwargs)
+    
+    @classmethod
+    async def async_hdel(
+        cls,
+        name: str,
+        *keys: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Delete one or more hash fields
+        """
+        session = cls.get_session(_session)
+        return await session.async_hdel(name, *keys, **kwargs)
+    
+    @classmethod
+    def hexists(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a hash field exists
+        """
+        session = cls.get_session(_session)
+        return session.hexists(name, key, **kwargs)
+    
+    @classmethod
+    async def async_hexists(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a hash field exists
+        """
+        session = cls.get_session(_session)
+        return await session.async_hexists(name, key, **kwargs)
+    
+    @classmethod
+    def hget(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get the value of a hash field
+        """
+        session = cls.get_session(_session)
+        return session.hget(name, key, **kwargs)
+    
+    @classmethod
+    async def async_hget(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get the value of a hash field
+        """
+        session = cls.get_session(_session)
+        return await session.async_hget(name, key, **kwargs)
+    
+    @classmethod
+    def hgetall(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Dict:
+        """
+        Get all the fields and values in a hash
+        """
+        session = cls.get_session(_session)
+        return session.hgetall(name, **kwargs)
+    
+    @classmethod
+    async def async_hgetall(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Dict:
+        """
+        Get all the fields and values in a hash
+        """
+        session = cls.get_session(_session)
+        return await session.async_hgetall(name, **kwargs)
+    
+    @classmethod
+    def hincrby(
+        cls,
+        name: str,
+        key: str,
+        amount: int = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the integer value of a hash field by the given number
+        """
+        session = cls.get_session(_session)
+        return session.hincrby(name, key, amount, **kwargs)
+    
+    @classmethod
+    async def async_hincrby(
+        cls,
+        name: str,
+        key: str,
+        amount: int = 1,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Increment the integer value of a hash field by the given number
+        """
+        session = cls.get_session(_session)
+        return await session.async_hincrby(name, key, amount, **kwargs)
+    
+    @classmethod
+    def hincrbyfloat(
+        cls,
+        name: str,
+        key: str,
+        amount: float = 1.0,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the float value of a hash field by the given amount
+        """
+        session = cls.get_session(_session)
+        return session.hincrbyfloat(name, key, amount, **kwargs)
+    
+    @classmethod
+    async def async_hincrbyfloat(
+        cls,
+        name: str,
+        key: str,
+        amount: float = 1.0,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the float value of a hash field by the given amount
+        """
+        session = cls.get_session(_session)
+        return await session.async_hincrbyfloat(name, key, amount, **kwargs)
+    
+    @classmethod
+    def hkeys(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get all the fields in a hash
+        """
+        session = cls.get_session(_session)
+        return session.hkeys(name, **kwargs)
+    
+    @classmethod
+    async def async_hkeys(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get all the fields in a hash
+        """
+        session = cls.get_session(_session)
+        return await session.async_hkeys(name, **kwargs)
+    
+    @classmethod
+    def hlen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of fields in a hash
+        """
+        session = cls.get_session(_session)
+        return session.hlen(name, **kwargs)
+    
+    @classmethod
+    async def async_hlen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of fields in a hash
+        """
+        session = cls.get_session(_session)
+        return await session.async_hlen(name, **kwargs)
+    
+    @classmethod
+    def hmget(
+        cls,
+        name: str,
+        keys: typing.List,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get the values of all the given hash fields
+        """
+        session = cls.get_session(_session)
+        return session.hmget(name, keys, **kwargs)
+    
+    @classmethod
+    async def async_hmget(
+        cls,
+        name: str,
+        keys: typing.List,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get the values of all the given hash fields
+        """
+        session = cls.get_session(_session)
+        return await session.async_hmget(name, keys, **kwargs)
+    
+    @classmethod
+    def hmset(
+        cls,
+        name: str,
+        mapping: typing.Dict,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple hash fields to multiple values
+        """
+        session = cls.get_session(_session)
+        return session.hmset(name, mapping, **kwargs)
+    
+    @classmethod
+    async def async_hmset(
+        cls,
+        name: str,
+        mapping: typing.Dict,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set multiple hash fields to multiple values
+        """
+        session = cls.get_session(_session)
+        return await session.async_hmset(name, mapping, **kwargs)
+    
+    @classmethod
+    def hset(
+        cls,
+        name: str,
+        key: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the string value of a hash field
+        """
+        session = cls.get_session(_session)
+        return session.hset(name, key, value, **kwargs)
+    
+    @classmethod
+    async def async_hset(
+        cls,
+        name: str,
+        key: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the string value of a hash field
+        """
+        session = cls.get_session(_session)
+        return await session.async_hset(name, key, value, **kwargs)
+    
+    @classmethod
+    def hsetnx(
+        cls,
+        name: str,
+        key: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value of a hash field, only if the field does not exist
+        """
+        session = cls.get_session(_session)
+        return session.hsetnx(name, key, value, **kwargs)
+    
+    @classmethod
+    async def async_hsetnx(
+        cls,
+        name: str,
+        key: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value of a hash field, only if the field does not exist
+        """
+        session = cls.get_session(_session)
+        return await session.async_hsetnx(name, key, value, **kwargs)
+    
+    @classmethod
+    def hstrlen(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of the value of a hash field
+        """
+        session = cls.get_session(_session)
+        return session.hstrlen(name, key, **kwargs)
+    
+    @classmethod
+    async def async_hstrlen(
+        cls,
+        name: str,
+        key: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of the value of a hash field
+        """
+        session = cls.get_session(_session)
+        return await session.async_hstrlen(name, key, **kwargs)
+    
+    @classmethod
+    def hvals(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get all the values in a hash
+        """
+        session = cls.get_session(_session)
+        return session.hvals(name, **kwargs)
+    
+    @classmethod
+    async def async_hvals(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get all the values in a hash
+        """
+        session = cls.get_session(_session)
+        return await session.async_hvals(name, **kwargs)
+    
+    @classmethod
+    def lindex(
+        cls,
+        name: str,
+        index: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get an element from a list by its index
+        """
+        session = cls.get_session(_session)
+        return session.lindex(name, index, **kwargs)
+    
+    @classmethod
+    async def async_lindex(
+        cls,
+        name: str,
+        index: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Get an element from a list by its index
+        """
+        session = cls.get_session(_session)
+        return await session.async_lindex(name, index, **kwargs)
+    
+    @classmethod
+    def linsert(
+        cls,
+        name: str,
+        where: str,
+        refvalue: typing.Any,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Insert an element before or after another element in a list
+        """
+    
+        session = cls.get_session(_session)
+        return session.linsert(name, where, refvalue, value, **kwargs)
+    
+    @classmethod
+    async def async_linsert(
+        cls,
+        name: str,
+        where: str,
+        refvalue: typing.Any,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Insert an element before or after another element in a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_linsert(name, where, refvalue, value, **kwargs)
+
+    @classmethod
+    def llen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of a list
+        """
+        session = cls.get_session(_session)
+        return session.llen(name, **kwargs)
+
+    @classmethod
+    async def async_llen(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the length of a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_llen(name, **kwargs)
+
+    @classmethod
+    def lpop(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the first element in a list
+        """
+        session = cls.get_session(_session)
+        return session.lpop(name, **kwargs)
+    
+    @classmethod
+    async def async_lpop(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the first element in a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_lpop(name, **kwargs)
+    
+    @classmethod
+    def lpush(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Prepend one or multiple values to a list
+        """
+        session = cls.get_session(_session)
+        return session.lpush(name, *values, **kwargs)
+    
+    @classmethod
+    async def async_lpush(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Prepend one or multiple values to a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_lpush(name, *values, **kwargs)
+    
+    @classmethod
+    def lpushx(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Prepend a value to a list, only if the list exists
+        """
+        session = cls.get_session(_session)
+        return session.lpushx(name, value, **kwargs)
+    
+    @classmethod
+    async def async_lpushx(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Prepend a value to a list, only if the list exists
+        """
+        session = cls.get_session(_session)
+        return await session.async_lpushx(name, value, **kwargs)
+    
+    @classmethod
+    def lrange(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get a range of elements from a list
+        """
+        session = cls.get_session(_session)
+        return session.lrange(name, start, end, **kwargs)
+    
+    @classmethod
+    async def async_lrange(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Get a range of elements from a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_lrange(name, start, end, **kwargs)
+    
+    @classmethod
+    def lrem(
+        cls,
+        name: str,
+        count: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove elements from a list
+        """
+        session = cls.get_session(_session)
+        return session.lrem(name, count, value, **kwargs)
+    
+    @classmethod
+    async def async_lrem(
+        cls,
+        name: str,
+        count: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove elements from a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_lrem(name, count, value, **kwargs)
+    
+    @classmethod
+    def lset(
+        cls,
+        name: str,
+        index: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value of an element in a list by its index
+        """
+        session = cls.get_session(_session)
+        return session.lset(name, index, value, **kwargs)
+    
+    @classmethod
+    async def async_lset(
+        cls,
+        name: str,
+        index: int,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set the value of an element in a list by its index
+        """
+        session = cls.get_session(_session)
+        return await session.async_lset(name, index, value, **kwargs)
+    
+    @classmethod
+    def ltrim(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Trim a list to the specified range
+        """
+        session = cls.get_session(_session)
+        return session.ltrim(name, start, end, **kwargs)
+    
+    @classmethod
+    async def async_ltrim(
+        cls,
+        name: str,
+        start: int,
+        end: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Trim a list to the specified range
+        """
+        session = cls.get_session(_session)
+        return await session.async_ltrim(name, start, end, **kwargs)
+    
+    @classmethod
+    def zadd(
+        cls,
+        name: str,
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a sorted set, or update its score if it already exists
+        """
+        session = cls.get_session(_session)
+        return session.zadd(name, *args, **kwargs)
+    
+    @classmethod
+    async def async_zadd(
+        cls,
+        name: str,
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a sorted set, or update its score if it already exists
+        """
+    
+    @classmethod
+    def zcard(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zcard(name, **kwargs)
+    
+    @classmethod
+    async def async_zcard(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zcard(name, **kwargs)
+    
+    @classmethod
+    def zcount(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+
+    ) -> int:
+        """
+        Count the members in a sorted set with scores within the given values
+        """
+        session = cls.get_session(_session)
+        return session.zcount(name, min, max, **kwargs)
+    
+    @classmethod
+    async def async_zcount(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Count the members in a sorted set with scores within the given values
+        """
+        session = cls.get_session(_session)
+        return await session.async_zcount(name, min, max, **kwargs)
+    
+    @classmethod
+    def zincrby(
+        cls,
+        name: str,
+        amount: float,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the score of a member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zincrby(name, amount, value, **kwargs)
+    
+    @classmethod
+    async def async_zincrby(
+        cls,
+        name: str,
+        amount: float,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Increment the score of a member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zincrby(name, amount, value, **kwargs)
+    
+    @classmethod
+    def zinterstore(
+        cls,
+        dest: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return session.zinterstore(dest, keys, aggregate, **kwargs)
+    
+    @classmethod
+    async def async_zinterstore(
+        cls,
+        dest: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return await session.async_zinterstore(dest, keys, aggregate, **kwargs)
+    
+    @classmethod
+    def zlexcount(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Count the number of members in a sorted set between a given lexicographical range
+        """
+        session = cls.get_session(_session)
+        return session.zlexcount(name, min, max, **kwargs)
+    
+    @classmethod
+    async def async_zlexcount(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Count the number of members in a sorted set between a given lexicographical range
+        """
+        session = cls.get_session(_session)
+        return await session.async_zlexcount(name, min, max, **kwargs)
+    
+    @classmethod
+    def zpopmax(
+        cls,
+        name: str,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Remove and session = cls.get_session(_session)
+        return members with the highest scores in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zpopmax(name, count, **kwargs)
+    
+    @classmethod
+    async def async_zpopmax(
+        cls,
+        name: str,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Remove and session = cls.get_session(_session)
+        return members with the highest scores in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zpopmax(name, count, **kwargs)
+    
+    @classmethod
+    def zpopmin(
+        cls,
+        name: str,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Remove and session = cls.get_session(_session)
+        return members with the lowest scores in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zpopmin(name, count, **kwargs)
+    
+    @classmethod
+    async def async_zpopmin(
+        cls,
+        name: str,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Remove and session = cls.get_session(_session)
+        return members with the lowest scores in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zpopmin(name, count, **kwargs)
+    
+    @classmethod
+    def zrange(
+        cls,
+        name: str,
+        start: int,
+        stop: int,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by index
+        """
+        session = cls.get_session(_session)
+        return session.zrange(name, start, stop, desc, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    async def async_zrange(
+        cls,
+        name: str,
+        start: int,
+        stop: int,
+        desc: bool = False,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by index
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrange(name, start, stop, desc, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    def zrangebylex(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        start: int = None,
+        num: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by lexicographical range
+        """
+        session = cls.get_session(_session)
+        return session.zrangebylex(name, min, max, start, num, **kwargs)
+    
+    @classmethod
+    async def async_zrangebylex(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        start: int = None,
+        num: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by lexicographical range
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrangebylex(name, min, max, start, num, **kwargs)
+    
+    @classmethod
+    def zrangebyscore(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        start: int = None,
+        num: int = None,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by score
+        """
+        session = cls.get_session(_session)
+        return session.zrangebyscore(name, min, max, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    async def async_zrangebyscore(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        start: int = None,
+        num: int = None,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by score
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrangebyscore(name, min, max, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    def zrank(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Determine the index of a member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zrank(name, value, **kwargs)
+    
+    @classmethod
+    async def async_zrank(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Determine the index of a member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrank(name, value, **kwargs)
+    
+    @classmethod
+    def zrem(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zrem(name, *values, **kwargs)
+    
+    @classmethod
+    async def async_zrem(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrem(name, *values, **kwargs)
+    
+    @classmethod
+    def zremrangebylex(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set between the given lexicographical range
+        """
+        session = cls.get_session(_session)
+        return session.zremrangebylex(name, min, max, **kwargs)
+    
+    @classmethod
+    async def async_zremrangebylex(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set between the given lexicographical range
+        """
+        session = cls.get_session(_session)
+        return await session.async_zremrangebylex(name, min, max, **kwargs)
+    
+    @classmethod
+    def zremrangebyrank(
+        cls,
+        name: str,
+        min: int,
+        max: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set within the given indexes
+        """
+        session = cls.get_session(_session)
+        return session.zremrangebyrank(name, min, max, **kwargs)
+    
+    @classmethod
+    async def async_zremrangebyrank(
+        cls,
+        name: str,
+        min: int,
+        max: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set within the given indexes
+        """
+        session = cls.get_session(_session)
+        return await session.async_zremrangebyrank(name, min, max, **kwargs)
+    
+    @classmethod
+    def zremrangebyscore(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set within the given scores
+        """
+        session = cls.get_session(_session)
+        return session.zremrangebyscore(name, min, max, **kwargs)
+
+    @classmethod
+    async def async_zremrangebyscore(
+        cls,
+        name: str,
+        min: typing.Any,
+        max: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove all members in a sorted set within the given scores
+        """
+        session = cls.get_session(_session)
+        return await session.async_zremrangebyscore(name, min, max, **kwargs)
+    
+    @classmethod
+    def zrevrange(
+        cls,
+        name: str,
+        start: int,
+        num: int,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by index, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return session.zrevrange(name, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    async def async_zrevrange(
+        cls,
+        name: str,
+        start: int,
+        num: int,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by index, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrevrange(name, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    def zrevrangebylex(
+        cls,
+        name: str,
+        max: typing.Any,
+        min: typing.Any,
+        start: int = None,
+        num: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by lexicographical range, ordered from higher to lower strings.
+        """
+        session = cls.get_session(_session)
+        return session.zrevrangebylex(name, max, min, start, num, **kwargs)
+    
+    @classmethod
+    async def async_zrevrangebylex(
+        cls,
+        name: str,
+        max: typing.Any,
+        min: typing.Any,
+        start: int = None,
+        num: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by lexicographical range, ordered from higher to lower strings.
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrevrangebylex(name, max, min, start, num, **kwargs)
+    
+    @classmethod
+    def zrevrangebyscore(
+        cls,
+        name: str,
+        max: typing.Any,
+        min: typing.Any,
+        start: int = None,
+        num: int = None,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by score, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return session.zrevrangebyscore(name, max, min, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    async def async_zrevrangebyscore(
+        cls,
+        name: str,
+        max: typing.Any,
+        min: typing.Any,
+        start: int = None,
+        num: int = None,
+        withscores: bool = False,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Return a range of members in a sorted set, by score, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrevrangebyscore(name, max, min, start, num, withscores, score_cast_func, **kwargs)
+    
+    @classmethod
+    def zrevrank(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Determine the index of a member in a sorted set, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return session.zrevrank(name, value, **kwargs)
+    
+    @classmethod
+    async def async_zrevrank(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Determine the index of a member in a sorted set, with scores ordered from high to low
+        """
+        session = cls.get_session(_session)
+        return await session.async_zrevrank(name, value, **kwargs)
+    
+    @classmethod
+    def zscore(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Get the score associated with the given member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return session.zscore(name, value, **kwargs)
+    
+    @classmethod
+    async def async_zscore(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> float:
+        """
+        Get the score associated with the given member in a sorted set
+        """
+        session = cls.get_session(_session)
+        return await session.async_zscore(name, value, **kwargs)
+    
+    @classmethod
+    def zunionstore(
+        cls,
+        dest: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return session.zunionstore(dest, keys, aggregate, **kwargs)
+    
+    @classmethod
+    async def async_zunionstore(
+        cls,
+        dest: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return await session.async_zunionstore(dest, keys, aggregate, **kwargs)
+    
+    @classmethod
+    def scan(
+        cls,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate the keys space
+        """
+        session = cls.get_session(_session)
+        return session.scan(cursor, match, count, **kwargs)
+    
+    @classmethod
+    async def async_scan(
+        cls,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate the keys space
+        """
+        session = cls.get_session(_session)
+        return await session.async_scan(cursor, match, count, **kwargs)
+    
+    @classmethod
+    def sscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate Set elements
+        """
+        session = cls.get_session(_session)
+        return session.sscan(name, cursor, match, count, **kwargs)
+    
+    @classmethod
+    async def async_sscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate Set elements
+        """
+        session = cls.get_session(_session)
+        return await session.async_sscan(name, cursor, match, count, **kwargs)
+    
+    @classmethod
+    def hscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate hash fields and associated values
+        """
+        session = cls.get_session(_session)
+        return session.hscan(name, cursor, match, count, **kwargs)
+    
+    @classmethod
+    async def async_hscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate hash fields and associated values
+        """
+        session = cls.get_session(_session)
+        return await session.async_hscan(name, cursor, match, count, **kwargs)
+    
+    @classmethod
+    def zscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate sorted sets elements and associated scores
+        """
+        session = cls.get_session(_session)
+        return session.zscan(name, cursor, match, count, score_cast_func, **kwargs)
+    
+    @classmethod
+    async def async_zscan(
+        cls,
+        name: str,
+        cursor: int = 0,
+        match: str = None,
+        count: int = None,
+        score_cast_func: typing.Callable = float,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Tuple[int, typing.List]:
+        """
+        Incrementally iterate sorted sets elements and associated scores
+        """
+        session = cls.get_session(_session)
+        return await session.async_zscan(name, cursor, match, count, score_cast_func, **kwargs)
+    
+    @classmethod
+    def zunion(
+        cls,
+        name: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Add multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return session.zunion(name, keys, aggregate, **kwargs)
+    
+    @classmethod
+    async def async_zunion(
+        cls,
+        name: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Add multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return await session.async_zunion(name, keys, aggregate, **kwargs)
+    
+    @classmethod
+    def zinter(
+        cls,
+        name: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Intersect multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return session.zinter(name, keys, aggregate, **kwargs)
+    
+    @classmethod
+    async def async_zinter(
+        cls,
+        name: str,
+        keys: typing.List[str],
+        aggregate: str = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Intersect multiple sorted sets and store the resulting sorted set in a new key
+        """
+        session = cls.get_session(_session)
+        return await session.async_zinter(name, keys, aggregate, **kwargs)
+    
 
     """
     Other utilities
     """
+    
+    @classmethod
+    def command(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Run a command
+        """
+        session = cls.get_session(_session)
+        return session.command(**kwargs)
+    
+    @classmethod
+    async def async_command(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Run a command
+        """
+        session = cls.get_session(_session)
+        return await session.async_command(**kwargs)
+    
+    @classmethod
+    def transaction(
+        cls,
+        func: Pipeline,
+        *watches: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Run a transaction
+        """
+        session = cls.get_session(_session)
+        return session.transaction(func, *watches, **kwargs)
+    
+    @classmethod
+    async def async_transaction(
+        cls,
+        func: AsyncPipeline,
+        *watches: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List:
+        """
+        Run a transaction
+        """
+        session = cls.get_session(_session)
+        return await session.async_transaction(func, *watches, **kwargs)
+    
+
+    @classmethod
+    def config_get(
+        cls,
+        pattern: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Dict:
+        """
+        Get the value of a configuration parameter
+        """
+        session = cls.get_session(_session)
+        return session.config_get(pattern, **kwargs)
+
+    @classmethod
+    async def async_config_get(
+        cls,
+        pattern: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Dict:
+        """
+        Get the value of a configuration parameter
+        """
+        session = cls.get_session(_session)
+        return await session.async_config_get(pattern, **kwargs)
+
+    @classmethod
+    def config_set(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a configuration parameter to the given value
+        """
+        session = cls.get_session(_session)
+        return session.config_set(name, value, **kwargs)
+
+    @classmethod
+    async def async_config_set(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Set a configuration parameter to the given value
+        """
+        session = cls.get_session(_session)
+        return await session.async_config_set(name, value, **kwargs)
+
+    @classmethod
+    def config_resetstat(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Reset the stats session = cls.get_session(_session)
+        returned by INFO
+        """
+        session = cls.get_session(_session)
+        return session.config_resetstat(**kwargs)
+
+    @classmethod
+    async def async_config_resetstat(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Reset the stats session = cls.get_session(_session)
+        returned by INFO
+        """
+        session = cls.get_session(_session)
+        return await session.async_config_resetstat(**kwargs)
+
+    @classmethod
+    def config_rewrite(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Rewrite the configuration file with the in memory configuration
+        """
+        session = cls.get_session(_session)
+        return session.config_rewrite(**kwargs)
+
+    @classmethod
+    async def async_config_rewrite(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Rewrite the configuration file with the in memory configuration
+        """
+        session = cls.get_session(_session)
+        return await session.async_config_rewrite(**kwargs)
+    
+    @classmethod
+    def keys(
+        cls,
+        pattern: typing.Optional[str] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List[KeyT]:
+        """
+        Get a List of all keys
+        """
+        session = cls.get_session(_session)
+        return session.keys(pattern = pattern, **kwargs)
+    
+    @classmethod
+    async def async_keys(
+        cls,
+        pattern: typing.Optional[str] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.List[KeyT]:
+        """
+        Get a List of all keys
+        """
+        session = cls.get_session(_session)
+        return await session.async_keys(pattern = pattern, **kwargs)
+
+    @classmethod
+    def flushall(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Delete all keys in the current database
+        """
+        session = cls.get_session(_session)
+        return session.flushall(**kwargs)
+    
+    @classmethod
+    async def async_flushall(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Delete all keys in the current database
+        """
+        session = cls.get_session(_session)
+        return await session.async_flushall(**kwargs)
+    
+    @classmethod
+    def flushdb(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Delete all keys in the current database
+        """
+        session = cls.get_session(_session)
+        return session.flushdb(**kwargs)
+    
+    @classmethod
+    async def async_flushdb(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Delete all keys in the current database
+        """
+        session = cls.get_session(_session)
+        return await session.async_flushdb(**kwargs)
+    
+    @classmethod
+    def dbsize(cls, _session: typing.Optional[str] = None, **kwargs) -> int:
+        """
+        Return the number of keys in the current database
+        """
+        session = cls.get_session(_session)
+        return session.dbsize(**kwargs)
+    
+    @classmethod
+    async def async_dbsize(cls, _session: typing.Optional[str] = None, **kwargs) -> int:
+        """
+        Return the number of keys in the current database
+        """
+        session = cls.get_session(_session)
+        return await session.async_dbsize(**kwargs)
+    
+    @classmethod
+    def randomkey(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Return a random key from the current database
+        """
+        session = cls.get_session(_session)
+        return session.randomkey(**kwargs)
+    
+    @classmethod
+    async def async_randomkey(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        Return a random key from the current database
+        """
+        session = cls.get_session(_session)
+        return await session.async_randomkey(**kwargs)
+    
+    @classmethod
+    def info(
+        cls,  
+        section: typing.Optional[str] = None,
+        *args,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Return information and statistics about the server
+        """
+        session = cls.get_session(_session)
+        return session.info(*args, section = section, **kwargs)
+    
+    @classmethod
+    async def async_info(
+        cls,
+        section: typing.Optional[str] = None,
+        *args,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Return information and statistics about the server
+        """
+        session = cls.get_session(_session)
+        return await session.async_info(*args, section = section, **kwargs)
+    
+    @classmethod
+    def move(
+        cls,
+        key: KeyT,
+        db: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a key to another database
+        """
+        session = cls.get_session(_session)
+        return session.move(key, db, **kwargs)
+    
+    @classmethod
+    async def async_move(
+        cls,
+        key: KeyT,
+        db: int,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a key to another database
+        """
+        session = cls.get_session(_session)
+        return await session.async_move(key, db, **kwargs)
+    
+    @classmethod
+    def rename(
+        cls,
+        key: KeyT,
+        newkey: KeyT,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Rename a key
+        """
+        session = cls.get_session(_session)
+        return session.rename(key, newkey, **kwargs)
+    
+    @classmethod
+    async def async_rename(
+        cls,
+        key: KeyT,
+        newkey: KeyT,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Rename a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_rename(key, newkey, **kwargs)
+    
+    @classmethod
+    def renamenx(
+        cls,
+        key: KeyT,
+        newkey: KeyT,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Rename a key, only if the new key does not exist
+        """
+        session = cls.get_session(_session)
+        return session.renamenx(key, newkey, **kwargs)
+    
+    @classmethod
+    async def async_renamenx(
+        cls,
+        key: KeyT,
+        newkey: KeyT,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Rename a key, only if the new key does not exist
+        """
+        session = cls.get_session(_session)
+        return await session.async_renamenx(key, newkey, **kwargs)
+    
+    @classmethod
+    def migrate(
+        cls,
+        session: typing.Optional[KeyDBSession] = None,
+        host: typing.Optional[str] = None,
+        port: typing.Optional[int] = None,
+        keys: typing.Optional[typing.Union[KeyT, typing.List[KeyT]]] = None,
+        destination_db: typing.Optional[int] = None,
+        timeout: typing.Optional[int] = None,
+        copy: typing.Optional[bool] = None,
+        replace: typing.Optional[bool] = None,
+        auth: typing.Optional[str] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Migrate a key to a different KeyDB instance
+        """
+        if session:
+            host = host or session.uri.host
+            port = port if port is not None else session.uri.port
+            auth = auth if auth is not None else session.uri.auth_str
+            destination_db = destination_db if destination_db is not None else session.uri.db_id
+        
+        session = cls.get_session(_session)
+        return session.migrate(
+            session = session,
+            host = host,
+            port = port,
+            keys = keys,
+            destination_db = destination_db,
+            timeout = timeout,
+            copy = copy,
+            replace = replace,
+            auth = auth,
+            **kwargs
+        )
+    
+    @classmethod
+    async def async_migrate(
+        cls,
+        session: typing.Optional[KeyDBSession] = None,
+        host: typing.Optional[str] = None,
+        port: typing.Optional[int] = None,
+        keys: typing.Optional[typing.Union[KeyT, typing.List[KeyT]]] = None,
+        destination_db: typing.Optional[int] = None,
+        timeout: typing.Optional[int] = None,
+        copy: typing.Optional[bool] = None,
+        replace: typing.Optional[bool] = None,
+        auth: typing.Optional[str] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Migrate a key to a different KeyDB instance
+        """
+        if session:
+            host = host or session.uri.host
+            port = port if port is not None else session.uri.port
+            auth = auth if auth is not None else session.uri.auth_str
+            destination_db = destination_db if destination_db is not None else session.uri.db_id
+        
+        session = cls.get_session(_session)
+        return await session.async_migrate(
+            session = session,
+            host = host,
+            port = port,
+            keys = keys,
+            destination_db = destination_db,
+            timeout = timeout,
+            copy = copy,
+            replace = replace,
+            auth = auth,
+            **kwargs
+        )
+
+    @classmethod
+    def module_list(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        List all modules
+        """
+        session = cls.get_session(_session)
+        return session.module_list(**kwargs)
+    
+    @classmethod
+    async def async_module_list(cls, _session: typing.Optional[str] = None, **kwargs):
+        """
+        List all modules
+        """
+        session = cls.get_session(_session)
+        return await session.async_module_list(**kwargs)
+
+    @classmethod
+    def module_load(
+        cls,
+        path: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Load a module
+        """
+        session = cls.get_session(_session)
+        return session.module_load(path, **kwargs)
+    
+    @classmethod
+    async def async_module_load(
+        cls,
+        path: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Load a module
+        """
+        session = cls.get_session(_session)
+        return await session.async_module_load(path, **kwargs)
+    
+    @classmethod
+    def module_loadex(
+        cls,
+        path: str,
+        options: typing.Optional[typing.List[str]] = None,
+        args: typing.Optional[typing.List[str]] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Load a module
+        """
+        session = cls.get_session(_session)
+        return session.module_loadex(path, options = options, args = args, **kwargs)
+
+    @classmethod
+    async def async_module_loadex(
+        cls,
+        path: str,
+        options: typing.Optional[typing.List[str]] = None,
+        args: typing.Optional[typing.List[str]] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Load a module
+        """
+        session = cls.get_session(_session)
+        return await session.async_module_loadex(path, options = options, args = args, **kwargs)
+    
+    @classmethod
+    def module_unload(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Unload a module
+        """
+        session = cls.get_session(_session)
+        return session.module_unload(name, **kwargs)
+    
+    @classmethod
+    async def async_module_unload(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        Unload a module
+        """
+        session = cls.get_session(_session)
+        return await session.async_module_unload(name, **kwargs)
+
 
     @classmethod
     def ping(cls, _session: typing.Optional[str] = None, **kwargs):
@@ -602,7 +3440,39 @@ class KeyDBClient:
         )
             
 
+    @classmethod
+    async def aclose(cls):
+        for name, ctx in cls.sessions.items():
+            logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
+            await ctx.aclose()
+        
+        cls.sessions = {}
+        cls.ctx = None
+        cls.current = None
+    
+    @classmethod
+    def close(cls):
+        for name, ctx in cls.sessions.items():
+            logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
+            ctx.close()
+        
+        cls.sessions = {}
+        cls.ctx = None
+        cls.current = None
 
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+    
+    async def __aenter__(self):
+        return self
+    
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        await self.aclose()
+    
 
 
 
