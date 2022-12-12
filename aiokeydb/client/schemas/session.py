@@ -2837,12 +2837,14 @@ class KeyDBSession:
         exclude_null: typing.Optional[bool] = False,
         exclude_return_types: typing.Optional[typing.List[type]] = None,
         exclude_return_objs: typing.Optional[typing.List[typing.Any]] = None,
+        exclude_kwargs: typing.Optional[typing.List[str]] = None,
         include_cache_hit: typing.Optional[bool] = False,
         _no_cache: typing.Optional[bool] = False,
         _no_cache_kwargs: typing.Optional[typing.List[str]] = None,
         _no_cache_validator: typing.Optional[typing.Callable] = None,
         _func_name: typing.Optional[str] = None,
         _validate_requests: typing.Optional[bool] = True,
+        _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -2957,7 +2959,9 @@ class KeyDBSession:
                                     return await func(*args, **kwargs), False
                                 return await func(*args, **kwargs)
 
+                    keybuilder_kwargs = kwargs.copy()
                     # Handle validation for requests
+                    
                     if _validate_requests:
                         copy_kwargs = kwargs.copy()
                         request = copy_kwargs.pop("request", None)
@@ -2970,9 +2974,32 @@ class KeyDBSession:
                                         return await func(*args, **kwargs), False
                                     return await func(*args, **kwargs)
                         
+                        # Remove headers from keybuilder
+                        if _exclude_request_headers:
+                            _nested_headers = None
+                            if keybuilder_kwargs.get("request", None) is not None and keybuilder_kwargs['requests'].get('headers', None) is not None:
+                                headers = keybuilder_kwargs["request"].pop("headers", None)
+                                _nested_headers = True
+                            elif keybuilder_kwargs.get("headers", None) is not None:
+                                headers = keybuilder_kwargs.pop("headers", None)
+                                _nested_headers = False
+                            
+                            if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
+                                for key in _exclude_request_headers:
+                                    _ = headers.pop(key, None)
+                                    _ = headers.pop(key.lower(), None)
+                            
+                                if _nested_headers:
+                                    keybuilder_kwargs["request"]["headers"] = headers
+                                else:
+                                    keybuilder_kwargs["headers"] = headers
+                    
+                    if exclude_kwargs:
+                        for key in exclude_kwargs:
+                            _ = keybuilder_kwargs.pop(key, None)
 
                     # Do the actual caching
-                    key = wrapper.__cache_key__(*args, **kwargs)
+                    key = wrapper.__cache_key__(*args, **keybuilder_kwargs)
                     try:
                         with anyio.fail_after(1):
                             result = await self.async_get(key, default = ENOVAL)
@@ -3035,6 +3062,9 @@ class KeyDBSession:
                             return func(*args, **kwargs), False
                         return func(*args, **kwargs)
 
+
+                    keybuilder_kwargs = kwargs.copy()
+
                     # Handle validation for requests
                     if _validate_requests:
                         copy_kwargs = kwargs.copy()
@@ -3048,6 +3078,30 @@ class KeyDBSession:
                                     if include_cache_hit:
                                         return func(*args, **kwargs), False
                                     return func(*args, **kwargs)
+                    
+                        # Remove headers from keybuilder
+                        if _exclude_request_headers:
+                            _nested_headers = None
+                            if keybuilder_kwargs.get("request", None) is not None and keybuilder_kwargs['requests'].get('headers', None) is not None:
+                                headers = keybuilder_kwargs["request"].pop("headers", None)
+                                _nested_headers = True
+                            elif keybuilder_kwargs.get("headers", None) is not None:
+                                headers = keybuilder_kwargs.pop("headers", None)
+                                _nested_headers = False
+                            
+                            if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
+                                for key in _exclude_request_headers:
+                                    _ = headers.pop(key, None)
+                                    _ = headers.pop(key.lower(), None)
+                            
+                                if _nested_headers:
+                                    keybuilder_kwargs["request"]["headers"] = headers
+                                else:
+                                    keybuilder_kwargs["headers"] = headers
+                    
+                    if exclude_kwargs:
+                        for key in exclude_kwargs:
+                            _ = keybuilder_kwargs.pop(key, None)
 
 
                     # Do the actual caching

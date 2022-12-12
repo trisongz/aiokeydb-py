@@ -3348,12 +3348,14 @@ class KeyDBClient:
         exclude_null: typing.Optional[bool] = False,
         exclude_return_types: typing.Optional[typing.List[type]] = None,
         exclude_return_objs: typing.Optional[typing.List[typing.Any]] = None,
+        exclude_kwargs: typing.Optional[typing.List[str]] = None,
         include_cache_hit: typing.Optional[bool] = False,
         _no_cache: typing.Optional[bool] = False,
         _no_cache_kwargs: typing.Optional[typing.List[str]] = None,
         _no_cache_validator: typing.Optional[typing.Callable] = None,
         _func_name: typing.Optional[str] = None,
         _validate_requests: typing.Optional[bool] = True,
+        _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
         _session: typing.Optional[str] = None,
         **kwargs
     ):
@@ -3430,12 +3432,14 @@ class KeyDBClient:
             exclude_null = exclude_null,
             exclude_return_types = exclude_return_types,
             exclude_return_objs = exclude_return_objs,
+            exclude_kwargs = exclude_kwargs,
             include_cache_hit = include_cache_hit,
             _no_cache = _no_cache,
             _no_cache_kwargs = _no_cache_kwargs,
             _no_cache_validator = _no_cache_validator,
             _func_name = _func_name,
             _validate_requests = _validate_requests,
+            _exclude_request_headers = _exclude_request_headers,
             **kwargs
         )
             
