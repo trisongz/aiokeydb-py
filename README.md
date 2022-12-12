@@ -1,6 +1,6 @@
 # aiokeydb
   
-  **Latest Version**: `v0.1.0`
+  **Latest Version**: [![PyPI version](https://badge.fury.io/py/aiokeydb.svg)](https://badge.fury.io/py/aiokeydb)
 
   Unified Syncronous and Asyncronous Python client for [KeyDB](https://github.com/Snapchat/KeyDB) and [Redis](https://github.com/redis).
 
