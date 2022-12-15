@@ -42,6 +42,7 @@ class KeyDBSession:
         cache_ttl: typing.Optional[Number] = None,
         cache_prefix: typing.Optional[str] = None,
         cache_enabled: typing.Optional[bool] = None,
+        _decode_responses: typing.Optional[bool] = None,
         **config,
     ):
         if isinstance(uri, str): uri = KeyDBUri(dsn = uri)
@@ -61,6 +62,8 @@ class KeyDBSession:
         self.cache_ttl = cache_ttl if cache_ttl is not None else self.settings.cache_ttl
         self.cache_enabled = cache_enabled if cache_enabled is not None else self.settings.cache_enabled
 
+
+        self._decode_responses = self.config.pop('decode_responses', _decode_responses)
         self._active = False
         # We'll use this to keep track of the number of times we've tried to
         # connect to the database. This is used to determine if we should
@@ -88,7 +91,7 @@ class KeyDBSession:
 
     @property
     def decode_responses(self):
-        return self.serializer is None
+        return self._decode_responses if self._decode_responses is not None else (self.serializer is None)
 
     @property
     def client(self) -> KeyDB:

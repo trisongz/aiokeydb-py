@@ -13,6 +13,7 @@ from aiokeydb.client.config import KeyDBSettings
 from aiokeydb.client.types import classproperty, KeyDBUri
 
 from aiokeydb.client.schemas.session import KeyDBSession
+from aiokeydb.client.serializers import SerializerType
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,69 @@ class KeyDBClient:
     encoder: typing.Type[Encoder] = None
     sessions: typing.Dict[str, KeyDBSession] = {}
     settings: typing.Type[KeyDBSettings] = None
+
+    @classmethod
+    def configure(
+        cls,
+        url: typing.Optional[str] = None,
+        host: typing.Optional[str] = None,
+        port: typing.Optional[int] = None,
+        db: typing.Optional[int] = None,
+        username: typing.Optional[str] = None,
+        password: typing.Optional[str] = None,
+        ssl: typing.Optional[bool] = None,
+        cache_ttl: typing.Optional[int] = None,
+        cache_prefix: typing.Optional[str] = None,
+        cache_enabled: typing.Optional[bool] = None,
+        worker_enabled: typing.Optional[bool] = None,
+        serializer: typing.Optional[SerializerType] = None,
+        db_mapping: typing.Optional[typing.Union[str, typing.Dict[str, int]]] = None,
+        socket_timeout: typing.Optional[float] = None,
+        socket_connect_timeout: typing.Optional[float] = None,
+        socket_keepalive: typing.Optional[bool] = None,
+        connection_timeout: typing.Optional[int] = None,
+        encoding: typing.Optional[str] = None,
+        encoding_errors: typing.Optional[str] = None,
+        config_kwargs: typing.Optional[typing.Union[str, typing.Dict[str, typing.Any]]] = None,
+        log_level: typing.Optional[str] = None,
+        queue_db: typing.Optional[int] = None,
+        **kwargs,
+    ):
+        """
+        Configures the global settings
+        """
+        if not cls.settings: cls.settings = KeyDBSettings()
+        cls.settings.configure(
+            url=url,
+            host=host,
+            port=port,
+            db=db,
+            username=username,
+            password=password,
+            ssl=ssl,
+            cache_ttl=cache_ttl,
+            cache_prefix=cache_prefix,
+            cache_enabled=cache_enabled,
+            worker_enabled=worker_enabled,
+            serializer=serializer,
+            db_mapping=db_mapping,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_connect_timeout,
+            socket_keepalive=socket_keepalive,
+            connection_timeout=connection_timeout,
+            encoding=encoding,
+            encoding_errors=encoding_errors,
+            config_kwargs=config_kwargs,
+            log_level=log_level,
+            queue_db=queue_db,
+            **kwargs,
+        )
+
+
+    @classmethod
+    def get_settings(cls) -> KeyDBSettings:
+        if not cls.settings: cls.settings = KeyDBSettings()
+        return cls.settings
 
     @classmethod
     def init_session(
@@ -75,11 +139,84 @@ class KeyDBClient:
         )
         cls.sessions[name] = ctx    
         logger.log(msg = f'Initialized Session: {name} ({uri})', level = cls.settings.loglevel)
-        if set_current or not cls.ctx:
+        if set_current or cls.ctx is None:
             cls.ctx = ctx
             cls.current = name
             logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
-    
+        return ctx
+
+    @classmethod
+    def add_session(
+        cls,
+        session: KeyDBSession,
+        overwrite: bool = False,
+        set_current: bool = False,
+        **kwargs
+    ):
+        """
+        Adds a session to the client.
+        """
+        if not isinstance(session, KeyDBSession):
+            raise TypeError('Session must be an instance of KeyDBSession')
+        if session.name in cls.sessions and not overwrite:
+            logger.warning(f'Session {session.name} already exists')
+            return
+        cls.sessions[session.name] = session
+        logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
+        if set_current:
+            cls.ctx = session
+            cls.current = session.name
+            logger.log(msg = f'Setting to Current Session: {session.name}', level = cls.settings.loglevel)
+
+    @classmethod
+    def create_session(
+        cls,
+        name: str,
+        db_id: int = None,
+        serializer: typing.Optional[typing.Any] = None,
+        overwrite: bool = False,
+        set_current: bool = False,
+        cache_enabled: typing.Optional[bool] = None,
+        _decode_responses: typing.Optional[bool] = None,
+        **kwargs,
+    ):
+        """
+        Create a new Session instance
+        - used in conjunction with aiokeydb.queues.TaskQueue
+        - does not explicitly set the serializer.
+        """
+        if name in cls.sessions and not overwrite:
+            logger.warning(f'Session {name} already exists')
+            return cls.sessions[name]
+        if not cls.settings: cls.get_settings()
+        db_id = db_id if db_id is not None else cls.settings.get_db_id(
+            name = name, db = db_id
+        )
+        uri: KeyDBUri = cls.settings.create_uri(
+            name = name,
+            db_id = db_id,
+            with_auth = True,
+        )
+        # logger.info(f'Creating Session: {name} ({uri})')
+        config = cls.settings.get_config(**kwargs)
+        ctx = KeyDBSession(
+            uri,
+            name = name,
+            db_id = db_id,
+            serializer = serializer,
+            settings = cls.settings,
+            cache_enabled = cache_enabled,
+            _decode_responses = _decode_responses,
+            **config,
+        )
+        cls.sessions[name] = ctx
+        logger.log(msg = f'Created Session: {name} ({uri}) @ DB {db_id}', level = cls.settings.loglevel)
+        if set_current:
+            cls.ctx = ctx
+            cls.current = name
+            logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
+        return ctx
+
     @classmethod
     def set_session(
         cls,
@@ -91,8 +228,6 @@ class KeyDBClient:
         cls.ctx = cls.sessions[name]
         cls.current = name
         logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
-
-
 
     @classmethod
     def get_session(
@@ -106,6 +241,47 @@ class KeyDBClient:
             cls.init_session(name = name, **kwargs)
         return cls.sessions[name]
 
+    @classmethod
+    def close_session(
+        cls,
+        name: str,
+        **kwargs,
+    ):
+        """
+        Remove a session from the client.
+        """
+        if name not in cls.sessions:
+            logger.log(msg = f'Session {name} does not exist', level = cls.settings.loglevel)
+            return
+        session = cls.sessions[name]
+        session.close()
+        del cls.sessions[name]
+        logger.log(msg = f'Removed Session: {name}', level = cls.settings.loglevel)
+        if name == cls.current:
+            cls.current = None
+            cls.ctx = None
+            logger.log(msg = f'Removed Current Session: {name}', level = cls.settings.loglevel)
+    
+    @classmethod
+    async def async_close_session(
+        cls,
+        name: str,
+        **kwargs,
+    ):
+        """
+        Remove a session from the client.
+        """
+        if name not in cls.sessions:
+            logger.log(msg = f'Session {name} does not exist', level = cls.settings.loglevel)
+            return
+        session = cls.sessions[name]
+        await session.aclose()
+        del cls.sessions[name]
+        logger.log(msg = f'Removed Session: {name}', level = cls.settings.loglevel)
+        if name == cls.current:
+            cls.current = None
+            cls.ctx = None
+            logger.log(msg = f'Removed Current Session: {name}', level = cls.settings.loglevel)
     
     @classproperty
     def session(cls) -> KeyDBSession:

@@ -185,6 +185,127 @@ async_client = AsyncKeyDB()
 sync_client = from_url('keydb://localhost:6379/0')
 async_client = from_url('keydb://localhost:6379/0', asyncio = True)
 
+```
+
+### Setting the Global Client Settings
+
+The library is designed to be explict and not have any global state. However, you can set the global client settings by using the `KeyDBClient.configure` method. This is useful if you are using the `KeyDBClient` class directly, or if you are using the `KeyDBClient` class in a library that you are developing.
+
+For example, if you initialize a session with a specific `uri`, the global client settings will still inherit from the default settings. 
+
+```python
+
+from aiokeydb import KeyDBClient
+from lazyops.utils import logger
+
+keydb_uris = {
+    'default': 'keydb://127.0.0.1:6379/0',
+    'cache': 'keydb://localhost:6379/1',
+    'public': 'redis://public.redis.db:6379/0',
+}
+
+sessions = {}
+
+# these will now be initialized
+for name, uri in keydb_uris.items():
+    sessions[name] = KeyDBClient.init_session(
+        name = name,
+        uri = uri,
+    )
+    logger.info(f'Session {name}: uri: {sessions[name].uri}')
+
+# however if you initialize another session
+# it will use the global environment vars
+
+sessions['test'] = KeyDBClient.init_session(
+    name = 'test',
+)
+logger.info(f'Session test: uri: {sessions["test"].uri}')
+```
+
+By configuring the global settings, any downstream sessions will inherit the global settings.
+
+```python
+from aiokeydb import KeyDBClient
+from lazyops.utils import logger
+
+default_uri = 'keydb://public.host.com:6379/0'
+keydb_dbs = {
+    'cache': {
+        'db_id': 1,
+    },
+    'db': {
+        'uri': 'keydb://127.0.0.1:6379/0',
+    },
+}
+
+KeyDBClient.configure(
+    url = default_uri,
+    debug_enabled = True,
+    queue_db = 1,
+)
+
+# now any sessions that are initialized will use the global settings
+
+sessions = {}
+# these will now be initialized
+
+# Initialize the first default session
+# which should utilize the `default_uri`
+KeyDBClient.init_session()
+
+for name, config in keydb_dbs.items():
+    sessions[name] = KeyDBClient.init_session(
+        name = name,
+        **config
+    )
+    logger.info(f'Session {name}: uri: {sessions[name].uri}')
+
+```
+
+---
+
+### KeyDB Worker Queues
+
+Released since `v0.1.1`
+
+KeyDB Worker Queues is a simple, fast, and reliable queue system for KeyDB. It is designed to be used in a distributed environment, where multiple KeyDB instances are used to process jobs. It is also designed to be used in a single instance environment, where a single KeyDB instance is used to process jobs.
+
+```python
+import asyncio
+from aiokeydb import KeyDBClient
+from aiokeydb.queues import TaskQueue, Worker
+from lazyops.utils import logger
+
+
+# Configure the KeyDB Client - the default keydb client will use 
+# db = 0, and queue uses 2 so that it doesn't conflict with other
+# by configuring it here, you can explicitly set the db to use
+keydb_uri = "keydb://127.0.0.1:6379/0"
+
+# Configure the Queue to use db = 1 instead of 2
+KeyDBClient.configure(
+    url = keydb_uri,
+    debug_enabled = True,
+    queue_db = 1,
+)
+
+@Worker.add_cronjob("*/1 * * * *")
+async def test_cron_task(*args, **kwargs):
+    logger.info("Cron task ran")
+    await asyncio.sleep(5)
+
+@Worker.add_function()
+async def test_task(*args, **kwargs):
+    logger.info("Task ran")
+    await asyncio.sleep(5)
+
+async def run_tests():
+    queue = TaskQueue("test_queue")
+    worker = Worker(queue)
+    await worker.start()
+
+asyncio.run(run_tests())
 
 ```
 
@@ -205,6 +326,8 @@ async_client = from_url('keydb://localhost:6379/0', asyncio = True)
 - `pydantic`
 
 - `anyio`
+
+- `lazyops`
 
 ---
 

@@ -70,11 +70,13 @@ def int_or_str(value):
     except ValueError:
         return value
 
+from aiokeydb.version import VERSION as __version__
 
-try:
-    __version__ = metadata.version("aiokeydb")
-except metadata.PackageNotFoundError:
-    __version__ = "99.99.99"
+
+# try:
+#     __version__ = metadata.version("aiokeydb")
+# except metadata.PackageNotFoundError:
+#     __version__ = "99.99.99"
 
 
 VERSION = tuple(map(int_or_str, __version__.split(".")))

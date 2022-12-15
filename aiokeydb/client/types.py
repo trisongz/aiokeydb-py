@@ -4,7 +4,7 @@ import typing
 import threading
 import functools
 
-from pydantic import validator
+from pydantic import validator, Field
 from pydantic import BaseSettings as _BaseSettings
 from pydantic import BaseModel as _BaseModel
 from pydantic.networks import AnyUrl, Parts
