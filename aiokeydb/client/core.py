@@ -49,6 +49,7 @@ class KeyDBClient:
         config_kwargs: typing.Optional[typing.Union[str, typing.Dict[str, typing.Any]]] = None,
         log_level: typing.Optional[str] = None,
         queue_db: typing.Optional[int] = None,
+        overwrite: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -80,6 +81,8 @@ class KeyDBClient:
             queue_db=queue_db,
             **kwargs,
         )
+        if overwrite is True: cls.init_session(overwrite=overwrite)
+
 
 
     @classmethod
@@ -101,9 +104,10 @@ class KeyDBClient:
         with_auth: bool = True,
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
+        overwrite: typing.Optional[bool] = None,
         **config,
     ):
-        if name in cls.sessions:
+        if name in cls.sessions and overwrite is not True:
             logger.warning(f'Session {name} already exists')
             return
         if not cls.settings: cls.settings = KeyDBSettings()

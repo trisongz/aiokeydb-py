@@ -1,5 +1,7 @@
 # aiokeydb changelogs
 
+## 0.1.2 (2022-12-20)
+- add `overwrite` option for `KeyDBClient.configure` to overwrite the default session.
 
 ## 0.0.12 (2022-12-08)
 
