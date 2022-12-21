@@ -2848,6 +2848,7 @@ class KeyDBSession:
         _func_name: typing.Optional[str] = None,
         _validate_requests: typing.Optional[bool] = True,
         _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
+        _cache_invalidator: typing.Optional[typing.Union[bool, typing.Callable]] = None,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -3003,6 +3004,30 @@ class KeyDBSession:
 
                     # Do the actual caching
                     key = wrapper.__cache_key__(*args, **keybuilder_kwargs)
+
+                    # Handle invalidating the key
+                    _invalidate_key = False
+                    if _cache_invalidator:
+                        if isinstance(_cache_invalidator, bool):
+                            _invalidate_key = _cache_invalidator
+
+                        elif iscoroutinefunction(_cache_invalidator):
+                            _invalidate_key = await _cache_invalidator(*args, _cache_key = key, **kwargs)
+                        
+                        else:
+                            _invalidate_key = _cache_invalidator(*args, _cache_key = key, **kwargs)
+
+                    if _invalidate_key:
+                        if self.settings.debug_enabled:
+                            logger.info(f'[{self.name}] Invalidating cache key: {key}')
+                        try:
+                            with anyio.fail_after(1):
+                                await self.async_delete(key)
+
+                        except TimeoutError:
+                            logger.error(f'[{self.name}] Calling DELETE on async KeyDB timed out. Cached function: {base}')
+                            self._cache_failed_attempts += 1
+
                     try:
                         with anyio.fail_after(1):
                             result = await self.async_get(key, default = ENOVAL)
@@ -3109,6 +3134,24 @@ class KeyDBSession:
 
                     # Do the actual caching
                     key = wrapper.__cache_key__(*args, **kwargs)
+                    
+                    # Handle invalidating the key
+                    _invalidate_key = False
+                    if _cache_invalidator:
+                        if isinstance(_cache_invalidator, bool):
+                            _invalidate_key = _cache_invalidator
+                        else:
+                            _invalidate_key = _cache_invalidator(*args, _cache_key = key, **kwargs)
+
+                    if _invalidate_key:
+                        if self.settings.debug_enabled:
+                            logger.info(f'[{self.name}] Invalidating cache key: {key}')
+                        try:
+                            self.delete(key)
+                        except TimeoutError:
+                            logger.error(f'[{self.name}] Calling DELETE on KeyDB timed out. Cached function: {base}')
+                            self._cache_failed_attempts += 1
+                    
                     try:
                         result = self.get(key, default = ENOVAL)
                     except TimeoutError:

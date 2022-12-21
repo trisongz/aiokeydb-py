@@ -47,6 +47,7 @@ class KeyDBClient:
         encoding: typing.Optional[str] = None,
         encoding_errors: typing.Optional[str] = None,
         config_kwargs: typing.Optional[typing.Union[str, typing.Dict[str, typing.Any]]] = None,
+        debug_enabled: typing.Optional[bool] = None,
         log_level: typing.Optional[str] = None,
         queue_db: typing.Optional[int] = None,
         overwrite: typing.Optional[bool] = None,
@@ -78,6 +79,7 @@ class KeyDBClient:
             encoding_errors=encoding_errors,
             config_kwargs=config_kwargs,
             log_level=log_level,
+            debug_enabled=debug_enabled,
             queue_db=queue_db,
             **kwargs,
         )
@@ -89,6 +91,11 @@ class KeyDBClient:
     def get_settings(cls) -> KeyDBSettings:
         if not cls.settings: cls.settings = KeyDBSettings()
         return cls.settings
+
+    @classproperty
+    def has_session(cls) -> bool:
+        if not cls.settings: return False
+        return bool(cls.ctx) if cls.sessions else False
 
     @classmethod
     def init_session(
@@ -143,7 +150,7 @@ class KeyDBClient:
         )
         cls.sessions[name] = ctx    
         logger.log(msg = f'Initialized Session: {name} ({uri})', level = cls.settings.loglevel)
-        if set_current or cls.ctx is None:
+        if (set_current or overwrite) or cls.ctx is None:
             cls.ctx = ctx
             cls.current = name
             logger.log(msg = f'Setting to Current Session: {name}', level = cls.settings.loglevel)
@@ -3536,7 +3543,9 @@ class KeyDBClient:
         _func_name: typing.Optional[str] = None,
         _validate_requests: typing.Optional[bool] = True,
         _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
+        _cache_invalidator: typing.Optional[typing.Union[bool, typing.Callable]] = None,
         _session: typing.Optional[str] = None,
+        _lazy_init: typing.Optional[bool] = None,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -3546,8 +3555,7 @@ class KeyDBClient:
         automatically.
 
         When expire is set to zero, function results will not be set in the
-        cache. Store lookups still occur, however. Read
-        :doc:`case-study-landing-page-caching` for example usage.
+        cache. Store lookups still occur, however. 
 
         If typed is set to True, function arguments of different types will be
         cached separately. For example, f(3) and f(3.0) will be treated as
@@ -3601,8 +3609,53 @@ class KeyDBClient:
             (default None, no expiry)
         :param cache_prefix: prefix to add to key
             (default KeyDBClient.cache_prefix | `cache_`)
+        :type cache_prefix: str | None
+        :param exclude: list of arguments to exclude from cache key
+            (default None, no exclusion)
+        :type exclude: list | None
+        :param exclude_null: exclude arguments with null values from cache key
+            (default False)
+        :type exclude_null: bool
+        :param exclude_return_types: list of return types to exclude from cache
+            (default None, no exclusion)
+        :type exclude_return_types: list | None
+        :param exclude_return_objs: list of return objects to exclude from cache
+            (default None, no exclusion)
+        :type exclude_return_objs: list | None
+        :param exclude_kwargs: list of kwargs to exclude from cache key
+            (default None, no exclusion)
+        :type exclude_kwargs: list | None
+        :param include_cache_hit: include cache hit in return value
+            (default False)
+        :type include_cache_hit: bool
+        :param bool _no_cache: disable cache for this function
+            (default False)
+        :param list _no_cache_kwargs: list of kwargs to disable cache for
+            (default None, no exclusion)
+        :param callable _no_cache_validator: callable to validate if cache should be disabled
+            (default None, no validation)
+        :param bool _validate_requests: validate requests
+            (default True)
+        :param _exclude_request_headers: list of headers to exclude from request validation
+            (default True, exclude all headers)
+        :type _exclude_request_headers: list | bool
+        :param _cache_invalidator: callable to invalidate cache
+            (default None, no invalidation)
+        :type _cache_invalidator: callable | bool
+        :param str _session: session name
+            (default None, use default session)
+        :param bool _lazy_init: lazy init session
+            (default None, use default session)
+        :param kwargs: additional arguments to pass to cache
+        
         :return: callable decorator
         """
+
+        # add _lazy_init to prevent loading the session
+        # before the class is fully initialized
+        if _lazy_init is not None and _lazy_init is True and not cls.has_session:
+            return
+
         session = cls.get_session(_session)
         return session.cachify(
             cache_ttl = cache_ttl,
@@ -3620,6 +3673,7 @@ class KeyDBClient:
             _func_name = _func_name,
             _validate_requests = _validate_requests,
             _exclude_request_headers = _exclude_request_headers,
+            _cache_invalidator = _cache_invalidator,
             **kwargs
         )
             

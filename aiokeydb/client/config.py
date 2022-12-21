@@ -168,6 +168,7 @@ class KeyDBSettings(BaseSettings):
     config_kwargs: Optional[Union[str, Dict[str, Any]]] = {}
     
     log_level: Optional[str] = 'INFO'
+    debug_enabled: Optional[bool] = False
 
     class Config:
         case_sensitive = False
@@ -444,6 +445,7 @@ class KeyDBSettings(BaseSettings):
         encoding_errors: Optional[str] = None,
         config_kwargs: Optional[Union[str, Dict[str, Any]]] = None,
         log_level: Optional[str] = None,
+        debug_enabled: Optional[bool] = None,
         queue_db: Optional[int] = None,
         **kwargs,
     ):
@@ -470,7 +472,9 @@ class KeyDBSettings(BaseSettings):
         if encoding is not None: self.encoding = encoding
         if encoding_errors is not None: self.encoding_errors = encoding_errors
         if config_kwargs is not None: self.config_kwargs = config_kwargs
+        if debug_enabled is not None: self.debug_enabled = debug_enabled
         if log_level is not None: self.log_level = log_level
+
         if kwargs or queue_db is not None:
             self.worker.configure(db = queue_db, **kwargs)
 
