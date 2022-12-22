@@ -383,7 +383,7 @@ class KeyDBClient:
             blocking = blocking,
             blocking_timeout = blocking_timeout,
             thread_local = thread_local,
-            _session = _session,
+            # _session = _session,
         )
     
     @classmethod
@@ -408,7 +408,7 @@ class KeyDBClient:
             blocking = blocking,
             blocking_timeout = blocking_timeout,
             thread_local = thread_local,
-            _session = _session,
+            # _session = _session,
         )
     
 

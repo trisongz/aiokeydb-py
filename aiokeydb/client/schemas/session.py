@@ -171,6 +171,7 @@ class KeyDBSession:
         blocking: bool = True,
         blocking_timeout: typing.Optional[Number] = None,
         thread_local: bool = True,
+        **kwargs,
     ) -> Lock:
         """
         Create a new Lock instance named ``name`` using the Redis client
@@ -222,6 +223,7 @@ class KeyDBSession:
         blocking: bool = True,
         blocking_timeout: typing.Optional[Number] = None,
         thread_local: bool = True,
+        **kwargs,
     ) -> AsyncLock:
         """
         Create a new Lock instance named ``name`` using the Redis client
