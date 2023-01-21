@@ -11,7 +11,7 @@ class ConnectionError(KeyDBError):
     pass
 
 
-class TimeoutError(asyncio.TimeoutError, builtins.TimeoutError, KeyDBError):
+class TimeoutError(KeyDBError):
     pass
 
 
