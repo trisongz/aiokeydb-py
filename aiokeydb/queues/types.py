@@ -170,7 +170,7 @@ class Job(BaseModel):
     kwargs: typing.Optional[dict] = None
     queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None
     key: typing.Optional[str] = Field(default_factory = get_default_job_key)
-    timeout: int = 600
+    timeout: typing.Optional[int] = 600
     heartbeat: int = 0
     retries: int = 1
     ttl: int = 600
@@ -394,3 +394,4 @@ class Job(BaseModel):
     @classmethod
     def get_fields(cls):
         return [field.name for field in cls.__fields__.values()]
+
