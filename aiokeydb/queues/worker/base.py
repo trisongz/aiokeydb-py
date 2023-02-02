@@ -105,7 +105,10 @@ class WorkerTasks:
         for name, dep in cls.dependencies.items():
             func, kwargs = dep
             if verbose: logger.info(f'[dependency] setting ctx[{name}]: result of {func.__name__}')
-            ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+            if kwargs.get('_set_ctx'):
+                ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
+            else:
+                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         
         return ctx
     
@@ -121,14 +124,17 @@ class WorkerTasks:
         for name, dep in cls.context_funcs.items():
             func, kwargs = dep
             if verbose: logger.info(f'[context] setting ctx[{name}]: result of {func.__name__}')
-            ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+            if kwargs.get('_set_ctx'):
+                ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
+            else:
+                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         return ctx
 
     @classmethod
     async def run_startup_funcs(
         cls,
         ctx: typing.Dict,
-        verbose: typing.Optional[bool] = None,
+        verbose: typing.Optional[bool] = True,
     ) -> typing.Dict[str, typing.Any]:
         """
         Runs all the worker startup functions
@@ -137,7 +143,11 @@ class WorkerTasks:
         for name, dep in cls.startup_funcs.items():
             func, kwargs = dep
             if verbose: logger.info(f'[startup] Setting ctx[{name}] = result of: {func.__name__}')
-            ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+            if kwargs.get('_set_ctx'):
+                # logger.info('Passing ctx to function')
+                ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
+            else:
+                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         return ctx
     
     @classmethod
@@ -308,6 +318,10 @@ class Worker:
                 for func in self.startup:
                     await func(self.context)
 
+            self.logger(kind = "startup").info(
+                f"Registered {len(self.functions)} functions, {len(self.cron_jobs)} cron jobs, {self.concurrency} concurrency. Functions: {list(self.functions.keys())}"
+            )
+
             # Register the queue
             await self.queue.register_queue()
             self.tasks.update(await self.upkeep())
@@ -472,6 +486,13 @@ class Worker:
             obj: object to pass to the function
             verbose: whether to print the function's output
             kwargs: additional arguments to pass to the function
+
+        >> @Worker.add_context("client")
+        >> async def init_client():
+        >>     return Client()
+
+        >> ctx['client'] = Client
+            
         """
         if obj is not None:
             name = name or obj.__name__
@@ -545,6 +566,23 @@ class Worker:
     ):
         """
         Add a startup function to the worker queue.
+
+
+        >> @Worker.on_startup("client")
+        >> async def init_client():
+        >>     return Client()
+
+        >> ctx['client'] = Client
+
+
+        >> @Worker.on_startup(_set_ctx = True)
+        >> async def init_client(ctx: Dict[str, Any], **kwargs):
+        >>   ctx['client'] = Client()
+        >>   return ctx
+
+        >> ctx['client'] = Client
+
+        
         """
         if _fx is not None:
             name = name or _fx.__name__
@@ -556,6 +594,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.startup_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered startup function {func_name}: {func}")
+            # logger.info(f"Registered startup function {func_name}: {func}: {kwargs}")
             return func
         
         return decorator
@@ -590,6 +629,17 @@ class Worker:
         verbose: typing.Optional[bool] = False,
         **kwargs,
     ):
+        """
+        Add a function to the worker queue.
+
+        >> @Worker.add_function()
+        >> async def my_function(*args, **kwargs):
+        >>     return "Hello World"
+
+        >> res = await queue.apply('my_function', *args, **kwargs)
+        >> assert res == "Hello World"
+        
+        """
         if _fx is not None:
             name = name or _fx.__name__
             WorkerTasks.functions.append(_fx)

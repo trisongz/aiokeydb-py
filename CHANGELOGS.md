@@ -1,5 +1,8 @@
 # aiokeydb changelogs
 
+## 0.1.7 (2023-02-01)
+  - Resolve worker issues for startup ctx
+
 ## 0.1.4 (2022-12-22)
   - hotfix for locks.
 
