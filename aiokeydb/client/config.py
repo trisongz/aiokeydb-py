@@ -437,10 +437,10 @@ class KeyDBSettings(BaseSettings):
         worker_enabled: Optional[bool] = None,
         serializer: Optional[SerializerType] = None,
         db_mapping: Optional[Union[str, Dict[str, int]]] = None,
-        socket_timeout: Optional[float] = None,
-        socket_connect_timeout: Optional[float] = None,
+        socket_timeout: Optional[float] = -1.0,
+        socket_connect_timeout: Optional[float] = -1.0,
+        connection_timeout: Optional[int] = -1,
         socket_keepalive: Optional[bool] = None,
-        connection_timeout: Optional[int] = None,
         encoding: Optional[str] = None,
         encoding_errors: Optional[str] = None,
         config_kwargs: Optional[Union[str, Dict[str, Any]]] = None,
@@ -465,10 +465,15 @@ class KeyDBSettings(BaseSettings):
         if worker_enabled is not None: self.worker_enabled = worker_enabled
         if serializer is not None: self.serializer = serializer
         if db_mapping is not None: self.db_mapping = db_mapping
-        if socket_timeout is not None: self.socket_timeout = socket_timeout
-        if socket_connect_timeout is not None: self.socket_connect_timeout = socket_connect_timeout
+        # if socket_timeout is not None: self.socket_timeout = socket_timeout
+        # if socket_connect_timeout is not None: self.socket_connect_timeout = socket_connect_timeout
+        # if connection_timeout is not None: self.connection_timeout = connection_timeout
+        
+        if socket_timeout is None or socket_timeout >= 0.0: self.socket_timeout = socket_timeout
+        if socket_connect_timeout is None or socket_connect_timeout >= 0.0: self.socket_connect_timeout = socket_connect_timeout
+        if connection_timeout is None or connection_timeout >= 0: self.connection_timeout = connection_timeout
+        
         if socket_keepalive is not None: self.socket_keepalive = socket_keepalive
-        if connection_timeout is not None: self.connection_timeout = connection_timeout
         if encoding is not None: self.encoding = encoding
         if encoding_errors is not None: self.encoding_errors = encoding_errors
         if config_kwargs is not None: self.config_kwargs = config_kwargs
