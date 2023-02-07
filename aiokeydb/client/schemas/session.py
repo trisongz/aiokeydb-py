@@ -1514,6 +1514,26 @@ class KeyDBSession:
         """
         return await self.async_client.lpop(name, **kwargs)
     
+    def rpop(
+        self,
+        name: str,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the last element in a list
+        """
+        return self.client.rpop(name, **kwargs)
+    
+    async def async_rpop(
+        self,
+        name: str,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the last element in a list
+        """
+        return await self.async_client.rpop(name, **kwargs)
+
     def lpush(
         self,
         name: str,
@@ -1535,6 +1555,28 @@ class KeyDBSession:
         Prepend one or multiple values to a list
         """
         return await self.async_client.lpush(name, *values, **kwargs)
+    
+    def rpush(
+        self,
+        name: str,
+        *values: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Append one or multiple values to a list
+        """
+        return self.client.rpush(name, *values, **kwargs)
+    
+    async def async_rpush(
+        self,
+        name: str,
+        *values: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Append one or multiple values to a list
+        """
+        return await self.async_client.rpush(name, *values, **kwargs)
     
     def lpushx(
         self,
@@ -1558,6 +1600,28 @@ class KeyDBSession:
         """
         return await self.async_client.lpushx(name, value, **kwargs)
     
+    def rpushx(
+        self,
+        name: str,
+        value: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Append a value to a list, only if the list exists
+        """
+        return self.client.rpushx(name, value, **kwargs)
+    
+    async def async_rpushx(
+        self,
+        name: str,
+        value: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Append a value to a list, only if the list exists
+        """
+        return await self.async_client.rpushx(name, value, **kwargs)
+
     def lrange(
         self,
         name: str,

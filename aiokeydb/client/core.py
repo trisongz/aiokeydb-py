@@ -1908,6 +1908,32 @@ class KeyDBClient:
         return await session.async_lpop(name, **kwargs)
     
     @classmethod
+    def rpop(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the last element in a list
+        """
+        session = cls.get_session(_session)
+        return session.rpop(name, **kwargs)
+
+    @classmethod
+    async def async_rpop(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Remove and get the last element in a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_rpop(name, **kwargs)
+
+    @classmethod
     def lpush(
         cls,
         name: str,
@@ -1936,6 +1962,34 @@ class KeyDBClient:
         return await session.async_lpush(name, *values, **kwargs)
     
     @classmethod
+    def rpush(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Append one or multiple values to a list
+        """
+        session = cls.get_session(_session)
+        return session.rpush(name, *values, **kwargs)
+    
+    @classmethod
+    async def async_rpush(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Append one or multiple values to a list
+        """
+        session = cls.get_session(_session)
+        return await session.async_rpush(name, *values, **kwargs)
+
+    @classmethod
     def lpushx(
         cls,
         name: str,
@@ -1963,6 +2017,34 @@ class KeyDBClient:
         session = cls.get_session(_session)
         return await session.async_lpushx(name, value, **kwargs)
     
+    @classmethod
+    def rpushx(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Append a value to a list, only if the list exists
+        """
+        session = cls.get_session(_session)
+        return session.rpushx(name, value, **kwargs)
+    
+    @classmethod
+    async def async_rpushx(
+        cls,
+        name: str,
+        value: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Append a value to a list, only if the list exists
+        """
+        session = cls.get_session(_session)
+        return await session.async_rpushx(name, value, **kwargs)
+
     @classmethod
     def lrange(
         cls,
