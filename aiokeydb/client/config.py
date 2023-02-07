@@ -161,8 +161,8 @@ class KeyDBSettings(BaseSettings):
 
     socket_timeout: Optional[float] = 60.0
     socket_connect_timeout: Optional[float] = 60.0
-    socket_keepalive: Optional[bool] = True
     connection_timeout: Optional[int] = 300
+    socket_keepalive: Optional[bool] = True
     encoding: Optional[str] = 'utf-8'
     encoding_errors: Optional[str] = 'strict'
     config_kwargs: Optional[Union[str, Dict[str, Any]]] = {}
