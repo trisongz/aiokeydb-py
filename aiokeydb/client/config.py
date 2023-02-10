@@ -31,7 +31,7 @@ class KeyDBWorkerSettings(BaseSettings):
     - management_enabled: Whether to enable management  | Default: True
 
     """
-    db: int = 2
+    db: Optional[int] = None
     name: Optional[str] = None
     prefix: Optional[str] = 'queue'
     queue_name: Optional[str] = 'workers'
@@ -153,8 +153,10 @@ class KeyDBSettings(BaseSettings):
     cache_ttl: Optional[int] = 60 * 60 * 24  # 1 day
     cache_prefix: Optional[str] = 'cache_'
     cache_enabled: Optional[bool] = True
+    # cache_db_id: Optional[int] = None
 
     worker_enabled: Optional[bool] = True
+    # worker_db_id: Optional[int] = None
     
     serializer: Optional[SerializerType] = SerializerType.default
     db_mapping: Optional[Union[str, Dict[str, int]]] = _default_db_mapping
@@ -188,7 +190,9 @@ class KeyDBSettings(BaseSettings):
 
     @lazyproperty
     def worker(self) -> KeyDBWorkerSettings:
-        return KeyDBWorkerSettings()
+        conf = KeyDBWorkerSettings()
+        if conf.db is None: conf.db = self.get_db_id('workers')
+        return conf
     
     @validator('config_kwargs', pre = True, always = True)
     def validate_config_kwargs(cls, v, values: Dict) -> Dict[str, Any]:
@@ -434,7 +438,11 @@ class KeyDBSettings(BaseSettings):
         cache_ttl: Optional[int] = None,
         cache_prefix: Optional[str] = None,
         cache_enabled: Optional[bool] = None,
+        cache_db_id: Optional[int] = None,
+
         worker_enabled: Optional[bool] = None,
+        worker_db_id: Optional[int] = None,
+
         serializer: Optional[SerializerType] = None,
         db_mapping: Optional[Union[str, Dict[str, int]]] = None,
         socket_timeout: Optional[float] = -1.0,
@@ -455,16 +463,23 @@ class KeyDBSettings(BaseSettings):
         if url is not None: self.url = url
         if host is not None: self.host = host
         if port is not None: self.port = port
-        if db is not None: self.db_id = db
+        if db is not None: self.db = db
         if username is not None: self.username = username
         if password is not None: self.password = password
         if ssl is not None: self.ssl = ssl
+        
         if cache_ttl is not None: self.cache_ttl = cache_ttl
         if cache_prefix is not None: self.cache_prefix = cache_prefix
         if cache_enabled is not None: self.cache_enabled = cache_enabled
         if worker_enabled is not None: self.worker_enabled = worker_enabled
+
         if serializer is not None: self.serializer = serializer
         if db_mapping is not None: self.db_mapping = db_mapping
+        
+        if cache_db_id is not None: self.db_mapping['cache'] = cache_db_id
+        if worker_db_id is not None: self.db_mapping['workers'] = worker_db_id
+        if db is not None: self.db_mapping['default'] = db
+
         # if socket_timeout is not None: self.socket_timeout = socket_timeout
         # if socket_connect_timeout is not None: self.socket_connect_timeout = socket_connect_timeout
         # if connection_timeout is not None: self.connection_timeout = connection_timeout
