@@ -5,6 +5,7 @@ import logging
 import asyncio
 
 import functools
+import contextlib
 from aiokeydb.typing import Number, KeyT
 from aiokeydb.lock import Lock
 from aiokeydb.connection import Encoder
@@ -45,6 +46,7 @@ class KeyDBSession:
         _decode_responses: typing.Optional[bool] = None,
         **config,
     ):
+        
         if isinstance(uri, str): uri = KeyDBUri(dsn = uri)
         self.uri: KeyDBUri = uri
         self.name = name
@@ -330,13 +332,14 @@ class KeyDBSession:
         self, 
         name: str, 
         value: typing.Any,
+        _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
         """
         Serializes the Value using `serializer` and executes a set command
         """
-        if self.serializer:
-            value = self.serializer.dumps(value)
+        if _serializer: value = _serializer(value)
+        elif self.serializer: value = self.serializer.dumps(value)
         return self.client.set(
             name = name,
             value = value,
@@ -347,13 +350,14 @@ class KeyDBSession:
         self, 
         name: str, 
         value: typing.Any,
+        _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
         """
         Serializes the Value using `serializer` and executes a set command
         """
-        if self.serializer:
-            value = self.serializer.dumps(value)
+        if _serializer: value = _serializer(value)
+        elif self.serializer: value = self.serializer.dumps(value)
         return await self.async_client.set(
             name = name,
             value = value,
@@ -363,7 +367,9 @@ class KeyDBSession:
     def get(
         self, 
         name: str, 
-        default: typing.Any = None, 
+        default: typing.Any = None,
+        _return_raw_value: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
         """
@@ -373,14 +379,21 @@ class KeyDBSession:
         """
         val = self.client.get(name)
         if not val: return default
+        if _return_raw_value: return val
+        if _serializer: return _serializer(val)
         if self.serializer:
-            val = self.serializer.loads(val, **kwargs)
+            try:
+                return self.serializer.loads(val, **kwargs)
+            except Exception:
+                return self.encoder.decode(val)
         return val
     
     async def async_get(
         self, 
         name: str, 
         default: typing.Any = None, 
+        _return_raw_value: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
         """
@@ -390,8 +403,13 @@ class KeyDBSession:
         """
         val = await self.async_client.get(name)
         if not val: return default
+        if _return_raw_value: return val
+        if _serializer: return _serializer(val)
         if self.serializer:
-            val = self.serializer.loads(val, **kwargs)
+            try:
+                return self.serializer.loads(val, **kwargs)
+            except Exception:
+                return self.encoder.decode(val)
         return val
     
     def delete(
@@ -2843,6 +2861,7 @@ class KeyDBSession:
         verbose: bool = False, 
         **kwargs
     ):
+        if self._active: return
         attempts = 0
         start_time = time.time()
         while True:
@@ -2871,6 +2890,7 @@ class KeyDBSession:
         verbose: bool = False, 
         **kwargs
     ):
+        if self._active: return
         attempts = 0
         start_time = time.time()
         while True:
@@ -2915,6 +2935,7 @@ class KeyDBSession:
         _validate_requests: typing.Optional[bool] = True,
         _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
         _cache_invalidator: typing.Optional[typing.Union[bool, typing.Callable]] = None,
+        _invalidate_after_n_hits: typing.Optional[int] = None,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -3038,8 +3059,9 @@ class KeyDBSession:
                         headers: typing.Dict[str, str] = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
                         # Handle No-Cache
                         if headers is not None:
-                            for key in {"Cache-Control", "X-Cache-Control"}:
-                                if headers.get(key, headers.get(key.lower(), "")) in {"no-store", "no-cache"}:
+                            check_headers = {k.lower(): v for k, v in headers.items()}
+                            for key in {"cache-control", "x-cache-control", "x-no-cache"}:
+                                if check_headers.get(key, "") in {"no-store", "no-cache", "true"}:
                                     if include_cache_hit:
                                         return await func(*args, **kwargs), False
                                     return await func(*args, **kwargs)
@@ -3071,6 +3093,8 @@ class KeyDBSession:
                     # Do the actual caching
                     key = wrapper.__cache_key__(*args, **keybuilder_kwargs)
 
+                    
+
                     # Handle invalidating the key
                     _invalidate_key = False
                     if _cache_invalidator:
@@ -3082,6 +3106,23 @@ class KeyDBSession:
                         
                         else:
                             _invalidate_key = _cache_invalidator(*args, _cache_key = key, **kwargs)
+
+                    # Handle checking for num of hits
+                    if _invalidate_after_n_hits:
+                        _hits_key = f'{key}:hits'
+                        _num_hits = 0
+                        with anyio.fail_after(1):
+                            # logger.info(f'Retrieving: {_hits_key}')
+                            # _num_hits = await self.async_client.get(_hits_key)
+                            _num_hits = await self.async_get(_hits_key)
+                            if _num_hits: _num_hits = int(_num_hits)
+                            # logger.info(f'Retrieving: {_num_hits}')
+
+                        if _num_hits and _num_hits > _invalidate_after_n_hits:
+                            _invalidate_key = True
+                            # logger.info(f'[{self.name}] Invalidating cache key: {key} after {_num_hits} hits')
+                            with anyio.fail_after(1):
+                                await self.async_delete(_hits_key)
 
                     if _invalidate_key:
                         if self.settings.debug_enabled:
@@ -3120,6 +3161,12 @@ class KeyDBSession:
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on async KeyDB timed out. Cached function: {base}')
                                 self._cache_failed_attempts += 1
+                    
+                    elif _invalidate_after_n_hits:
+                        with anyio.fail_after(1):
+                            # logger.info(f'[{self.name}] Calling INCR on async KeyDB. Cached function: {_hits_key}')
+                            await self.async_incr(_hits_key)
+                            # await self.async_set(_hits_key, _num_hits)
                     
                     return (result, is_cache_hit) if include_cache_hit else result
 
@@ -3167,8 +3214,9 @@ class KeyDBSession:
                         # Handle No-Cache
                         headers: typing.Dict[str, str] = kwargs.pop("headers", getattr(request, "headers", kwargs.pop("headers", None)))
                         if headers is not None:
-                            for key in {"Cache-Control", "X-Cache-Control"}:
-                                if headers.get(key, headers.get(key.lower(), "")) in {"no-store", "no-cache"}:
+                            check_headers = {k.lower(): v for k, v in headers.items()}
+                            for key in {"cache-control", "x-cache-control", "x-no-cache"}:
+                                if check_headers.get(key, "") in {"no-store", "no-cache", "true"}:
                                     if include_cache_hit:
                                         return func(*args, **kwargs), False
                                     return func(*args, **kwargs)
@@ -3209,6 +3257,18 @@ class KeyDBSession:
                         else:
                             _invalidate_key = _cache_invalidator(*args, _cache_key = key, **kwargs)
 
+                    # Handle checking for num of hits
+                    if _invalidate_after_n_hits:
+                        _hits_key = f'{key}:hits'
+                        _num_hits = 0
+                        with contextlib.suppress(TimeoutError):
+                            _num_hits = self.get(_hits_key)
+                            if _num_hits: _num_hits = int(_num_hits)
+                        if _num_hits and _num_hits > _invalidate_after_n_hits:
+                            _invalidate_key = True
+                            with contextlib.suppress(TimeoutError):
+                                self.delete(_hits_key)
+
                     if _invalidate_key:
                         if self.settings.debug_enabled:
                             logger.info(f'[{self.name}] Invalidating cache key: {key}')
@@ -3240,6 +3300,10 @@ class KeyDBSession:
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on KeyDB timed out. Cached function: {base}')
                                 self._cache_failed_attempts += 1
+                    
+                    elif _invalidate_after_n_hits:
+                        with contextlib.suppress(TimeoutError):
+                            self.incr(_hits_key, 1)
                     
                     return (result, is_cache_hit) if include_cache_hit else result
 
@@ -3286,3 +3350,6 @@ class KeyDBSession:
     
     def __len__(self) -> int:
         return self.dbsize()
+    
+    def __bool__(self) -> bool:
+        return self._active

@@ -442,7 +442,7 @@ class KeyDBUri(BaseModel):
         return self.dsn.user or self.dsn.password
 
     def __str__(self):
-        return self.uri_no_auth
+        return f'{self.uri_no_auth}'
 
     def __repr__(self):
         return f'<KeyDBUri {self.uri_no_auth}>'
