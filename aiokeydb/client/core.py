@@ -5,7 +5,7 @@ from aiokeydb.lock import Lock
 from aiokeydb.connection import Encoder
 from aiokeydb.core import KeyDB, PubSub, Pipeline
 
-from aiokeydb.typing import Number, KeyT
+from aiokeydb.typing import Number, KeyT, AbsExpiryT, ExpiryT
 from aiokeydb.asyncio.lock import AsyncLock
 from aiokeydb.asyncio.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
 
@@ -424,6 +424,15 @@ class KeyDBClient:
         cls, 
         name: str, 
         value: typing.Any,
+        ex: typing.Union[ExpiryT, None] = None,
+        px: typing.Union[ExpiryT, None] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: typing.Union[AbsExpiryT, None] = None,
+        pxat: typing.Union[AbsExpiryT, None] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         _session: typing.Optional[str] = None,
         **kwargs
     ) -> typing.Any:
@@ -434,6 +443,15 @@ class KeyDBClient:
         return session.set(
             name = name,
             value = value,
+            ex = ex,
+            px = px,
+            nx = nx,
+            xx = xx,
+            keepttl = keepttl,
+            get = get,
+            exat = exat,
+            pxat = pxat,
+            _serializer = _serializer,
             **kwargs
         )
         
@@ -442,6 +460,15 @@ class KeyDBClient:
         cls, 
         name: str, 
         value: typing.Any,
+        ex: typing.Union[ExpiryT, None] = None,
+        px: typing.Union[ExpiryT, None] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: typing.Union[AbsExpiryT, None] = None,
+        pxat: typing.Union[AbsExpiryT, None] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         _session: typing.Optional[str] = None,
         **kwargs
     ) -> typing.Any:
@@ -452,6 +479,15 @@ class KeyDBClient:
         return await session.async_set(
             name = name,
             value = value,
+            ex = ex,
+            px = px,
+            nx = nx,
+            xx = xx,
+            keepttl = keepttl,
+            get = get,
+            exat = exat,
+            pxat = pxat,
+            _serializer = _serializer,
             **kwargs
         )
     
@@ -460,6 +496,8 @@ class KeyDBClient:
         cls, 
         name: str, 
         default: typing.Any = None, 
+        _return_raw_value: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         _session: typing.Optional[str] = None,
         **kwargs
     ) -> typing.Any:
@@ -472,6 +510,8 @@ class KeyDBClient:
         return session.get(
             name = name,
             default = default,
+            _return_raw_value = _return_raw_value,
+            _serializer = _serializer,
             **kwargs
         )
     
@@ -480,6 +520,8 @@ class KeyDBClient:
         cls, 
         name: str, 
         default: typing.Any = None, 
+        _return_raw_value: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
         _session: typing.Optional[str] = None,
         **kwargs
     ) -> typing.Any:
@@ -492,6 +534,8 @@ class KeyDBClient:
         return await session.async_get(
             name = name,
             default = default,
+            _return_raw_value = _return_raw_value,
+            _serializer = _serializer,
             **kwargs
         )
     

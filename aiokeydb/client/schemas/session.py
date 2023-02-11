@@ -6,7 +6,7 @@ import asyncio
 
 import functools
 import contextlib
-from aiokeydb.typing import Number, KeyT
+from aiokeydb.typing import Number, KeyT, ExpiryT, AbsExpiryT
 from aiokeydb.lock import Lock
 from aiokeydb.connection import Encoder
 from aiokeydb.core import KeyDB, PubSub, Pipeline
@@ -332,6 +332,14 @@ class KeyDBSession:
         self, 
         name: str, 
         value: typing.Any,
+        ex: typing.Union[ExpiryT, None] = None,
+        px: typing.Union[ExpiryT, None] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: typing.Union[AbsExpiryT, None] = None,
+        pxat: typing.Union[AbsExpiryT, None] = None,
         _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
@@ -343,6 +351,14 @@ class KeyDBSession:
         return self.client.set(
             name = name,
             value = value,
+            ex = ex,
+            px = px,
+            nx = nx,
+            xx = xx,
+            keepttl = keepttl,
+            get = get,
+            exat = exat,
+            pxat = pxat,
             **kwargs
         )
 
@@ -350,6 +366,14 @@ class KeyDBSession:
         self, 
         name: str, 
         value: typing.Any,
+        ex: typing.Union[ExpiryT, None] = None,
+        px: typing.Union[ExpiryT, None] = None,
+        nx: bool = False,
+        xx: bool = False,
+        keepttl: bool = False,
+        get: bool = False,
+        exat: typing.Union[AbsExpiryT, None] = None,
+        pxat: typing.Union[AbsExpiryT, None] = None,
         _serializer: typing.Optional[typing.Callable] = None,
         **kwargs
     ) -> typing.Any:
@@ -361,6 +385,14 @@ class KeyDBSession:
         return await self.async_client.set(
             name = name,
             value = value,
+            ex = ex,
+            px = px,
+            nx = nx,
+            xx = xx,
+            keepttl = keepttl,
+            get = get,
+            exat = exat,
+            pxat = pxat,
             **kwargs
         )
     
