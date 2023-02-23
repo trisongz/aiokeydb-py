@@ -2960,6 +2960,7 @@ class KeyDBSession:
         exclude_return_objs: typing.Optional[typing.List[typing.Any]] = None,
         exclude_kwargs: typing.Optional[typing.List[str]] = None,
         include_cache_hit: typing.Optional[bool] = False,
+        invalidate_cache_key: typing.Optional[str] = None,
         _no_cache: typing.Optional[bool] = False,
         _no_cache_kwargs: typing.Optional[typing.List[str]] = None,
         _no_cache_validator: typing.Optional[typing.Callable] = None,
@@ -3046,6 +3047,10 @@ class KeyDBSession:
                 async def wrapper(*args, **kwargs):
                     "Wrapper for callable to cache arguments and return values."
 
+                    __invalidate_cache = kwargs.pop(invalidate_cache_key, False) if \
+                        invalidate_cache_key else False
+                    if __invalidate_cache is None: __invalidate_cache = False
+
                     # If cache is disabled, return
                     if self.cache_enabled is False:
                         if include_cache_hit:
@@ -3128,8 +3133,8 @@ class KeyDBSession:
                     
 
                     # Handle invalidating the key
-                    _invalidate_key = False
-                    if _cache_invalidator:
+                    _invalidate_key = __invalidate_cache
+                    if not _invalidate_key and _cache_invalidator:
                         if isinstance(_cache_invalidator, bool):
                             _invalidate_key = _cache_invalidator
 
@@ -3205,6 +3210,11 @@ class KeyDBSession:
             else:
                 @functools.wraps(func)
                 def wrapper(*args, **kwargs):
+
+                    # Get the cache key to invalidate
+                    __invalidate_cache = kwargs.pop(invalidate_cache_key, False) if \
+                        invalidate_cache_key else False
+                    if __invalidate_cache is None: __invalidate_cache = False
 
                     # If cache is disabled, return
                     if self.cache_enabled is False:
@@ -3282,8 +3292,8 @@ class KeyDBSession:
                     key = wrapper.__cache_key__(*args, **kwargs)
                     
                     # Handle invalidating the key
-                    _invalidate_key = False
-                    if _cache_invalidator:
+                    _invalidate_key = __invalidate_cache
+                    if not _invalidate_key and _cache_invalidator:
                         if isinstance(_cache_invalidator, bool):
                             _invalidate_key = _cache_invalidator
                         else:
