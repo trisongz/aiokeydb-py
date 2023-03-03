@@ -77,6 +77,10 @@ class TaskQueue:
         management_register_api_path: typing.Optional[str] = None,
         uuid: typing.Optional[str] = None,
         metrics_func: typing.Optional[typing.Callable] = None,
+        verbose_results: typing.Optional[bool] = False,
+        truncate_logs: typing.Optional[bool] = True,
+        logging_max_length: typing.Optional[int] = 500,
+        silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
         **kwargs
     ):
     
@@ -119,6 +123,15 @@ class TaskQueue:
         self._before_enqueues = {}
         self._op_sem = asyncio.Semaphore(self.max_concurrency)
         self._metrics_func = metrics_func
+
+        self.verbose_results = verbose_results
+        self.truncate_logs = truncate_logs
+        self.logging_max_length = logging_max_length
+        self.silenced_functions = silenced_functions or []
+    
+    def add_silenced_functions(self, *functions):
+        self.silenced_functions.extend(functions)
+        self.silenced_functions = list(set(self.silenced_functions))
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
         if job:
@@ -227,7 +240,19 @@ class TaskQueue:
                 elif job.status != JobStatus.ACTIVE or job.stuck:
                     swept.append(job_id)
                     await job.finish(JobStatus.ABORTED, error="swept")
-                    self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}, result={job.result}")
+                    if job.function in self.silenced_functions:
+                        pass
+                    elif self.verbose_results:
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}, result={job.result}")
+                    elif self.truncate_logs:
+                        job_result = (
+                            f'{str(job.result)[:self.logging_max_length]}...'
+                            if self.logging_max_length
+                            else str(job.result)
+                        )
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}, result={job_result}")
+                    else:
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}")
         return swept
 
     async def listen(self, job_keys: typing.List[str], callback: typing.Callable, timeout: int = 10):
@@ -335,7 +360,7 @@ class TaskQueue:
             await pipe.set(job_id, self.serialize(job)).execute()
             self.retried += 1
             await self.notify(job)
-            if not self.debug_enabled:
+            if not self.debug_enabled and job.function not in self.silenced_functions:
                 self.logger(job=job, kind = "retry").info(f"↻ duration={job.duration('running')}ms, node={self.node_name}, func={job.function}, error={job.error}")
 
     async def finish(
@@ -380,8 +405,20 @@ class TaskQueue:
             await self.notify(job)
             if self.debug_enabled:
                 self.logger(job=job, kind = "finish").info(f"Finished {job}")
+            
+            elif job.function in self.silenced_functions:
+                pass
+
+            elif self.verbose_results or not self.truncate_logs:
+                self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
             else:
-                self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job.result}")
+                job_result = (
+                    f'{str(job.result)[:self.logging_max_length]}...'
+                    if self.logging_max_length
+                    else str(job.result)
+                )
+                self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
+
 
     async def dequeue(self, timeout=0):
         if await self.version() < (6, 2, 0):
@@ -487,14 +524,20 @@ class TaskQueue:
                 return None
         if not self.client_mode and self.debug_enabled:
             self.logger(job=job, kind="enqueue").info(f"Enqueuing {job}")
-        else:
-            
+        elif job.function in self.silenced_functions:
+            pass
+        elif self.verbose_results:
             self.logger(job=job, kind="enqueue").info(
-                f"→ duration={now() - job.queued}ms, \
-                node={self.node_name}, \
-                func={job.function}, \
-                timeout={job.timeout}, \
-                kwargs={job.kwargs}"
+                f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}, kwargs={job.kwargs}"
+            )
+        elif self.truncate_logs:
+            job_kwargs = f"{str({k: str(v)[:self.logging_max_length] for k, v in job.kwargs.items()})[:self.logging_max_length]}..."
+            self.logger(job=job, kind="enqueue").info(
+                f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}, kwargs={job_kwargs}"
+            )
+        else:
+            self.logger(job=job, kind="enqueue").info(
+                f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}"
             )
 
         return job

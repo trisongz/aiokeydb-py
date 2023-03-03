@@ -54,6 +54,8 @@ class WorkerTasks:
     startup_funcs: typing.Dict[str, typing.Tuple[typing.Union[typing.Any, typing.Callable], typing.Dict]] = {}
     shutdown_funcs: typing.Dict[str, typing.Tuple[typing.Union[typing.Any, typing.Callable], typing.Dict]] = {}
 
+    silenced_functions: typing.List[str] = []
+
     @classmethod
     def get_functions(
         cls,
@@ -87,7 +89,9 @@ class WorkerTasks:
         cronjobs = []
         for cron_op in cls.cronjobs:
             if isinstance(cron_op, dict): 
+                silenced = cron_op.pop('silenced', None)
                 cron_op = CronJob(**cron_op)
+                if silenced is True: cls.silenced_functions.append(cron_op.function.__name__)
             if verbose: 
                 logger.info(f'Worker CronJob: {cron_op.function.__name__}: {cron_op.cron}')
             cronjobs.append(cron_op)
@@ -228,12 +232,17 @@ class Worker:
         selectors: typing.Optional[typing.Dict[str, typing.Any]] = None,
         threadpool_size: typing.Optional[int] = None,
         debug_enabled: typing.Optional[bool] = None,
+        silenced_functions: typing.Optional[typing.List[str]] = None,
     ):
         self.queue = queue
         self.settings = settings or get_settings()
         self.name = name if name is not None else (self.settings.worker.name or get_hostname())
         self.concurrency = concurrency if concurrency is not None else self.settings.worker.concurrency
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
+
+        self.silenced_functions = silenced_functions or list(set(WorkerTasks.silenced_functions))
+        self.queue.add_silenced_functions(*self.silenced_functions)
+
         self.startup = startup or [
             WorkerTasks.get_startup_context
         ]
@@ -475,6 +484,7 @@ class Worker:
         obj: typing.Optional[typing.Any] = None,
         name: typing.Optional[str] = None,
         verbose: typing.Optional[bool] = False,
+        silenced: typing.Optional[bool] = None,
         _fx: typing.Optional[typing.Callable] = None,
         **kwargs,
     ):
@@ -502,12 +512,15 @@ class Worker:
             else:
                 WorkerTasks.context[name] = obj
                 if verbose: logger.info(f"Registered context {name}: {obj}")
+            if silenced is True:
+                WorkerTasks.silenced_functions.append(name)
             return
         
         if _fx is not None:
             name = name or _fx.__name__
             WorkerTasks.context_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered context function {name}: {_fx}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
 
         # Create a wrapper
@@ -515,6 +528,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.context_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered context function {func_name}: {func}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return func
         
         return wrapper
@@ -525,6 +539,7 @@ class Worker:
         name: typing.Optional[str] = None,
         verbose: typing.Optional[bool] = False,
         _fx: typing.Optional[typing.Callable] = None,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -539,12 +554,14 @@ class Worker:
             name = name or obj.__name__
             WorkerTasks.dependencies[name] = (obj, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {obj}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
         
         if _fx is not None:
             name = name or _fx.__name__
             WorkerTasks.dependencies[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {_fx}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
         
         # Create a wrapper
@@ -552,6 +569,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.dependencies[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered depency{func_name}: {func}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return func
         
         return wrapper
@@ -562,6 +580,7 @@ class Worker:
         name: typing.Optional[str] = None,
         verbose: typing.Optional[bool] = False,
         _fx: typing.Optional[typing.Callable] = None,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -588,12 +607,14 @@ class Worker:
             name = name or _fx.__name__
             WorkerTasks.startup_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered startup function {name}: {_fx}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
         
         def decorator(func: typing.Callable):
             func_name = name or func.__name__
             WorkerTasks.startup_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered startup function {func_name}: {func}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             # logger.info(f"Registered startup function {func_name}: {func}: {kwargs}")
             return func
         
@@ -604,6 +625,7 @@ class Worker:
         name: typing.Optional[str] = None,
         verbose: typing.Optional[bool] = False,
         _fx: typing.Optional[typing.Callable] = None,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -613,12 +635,14 @@ class Worker:
             name = name or _fx.__name__
             WorkerTasks.shutdown_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered shutdown function {name}: {_fx}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
         
         def decorator(func: typing.Callable):
             func_name = name or func.__name__
             WorkerTasks.shutdown_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered shutdown function {func_name}: {func}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return func
         return decorator
 
@@ -627,6 +651,7 @@ class Worker:
         name: typing.Optional[str] = None,
         _fx: typing.Optional[typing.Callable] = None,
         verbose: typing.Optional[bool] = False,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -645,12 +670,14 @@ class Worker:
             WorkerTasks.functions.append(_fx)
             if verbose:
                 logger.info(f"Registered function {name}: {_fx}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return
         
         def decorator(func: typing.Callable):
             WorkerTasks.functions.append(func)
             if verbose:
                 logger.info(f"Registered function {func.__name__}")
+            if silenced is True: WorkerTasks.silenced_functions.append(name)
             return func
         
         return decorator
@@ -661,6 +688,7 @@ class Worker:
         schedule: typing.Optional[typing.Union[typing.Dict, typing.List, str]] = None,
         _fx: typing.Optional[typing.Callable] = None,
         verbose: typing.Optional[bool] = False,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -670,14 +698,14 @@ class Worker:
         }
         """
         if _fx is not None:
-            cron = {'function': _fx, **kwargs, 'cron': schedule}
+            cron = {'function': _fx, **kwargs, 'cron': schedule, 'silenced': silenced}
             WorkerTasks.cronjobs.append(cron)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return
         
         def decorator(func: typing.Callable):
             nonlocal schedule
-            cron = {'function': func, **kwargs, 'cron': schedule}
+            cron = {'function': func, **kwargs, 'cron': schedule, 'silenced': silenced}
             WorkerTasks.cronjobs.append(cron)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return func
@@ -690,6 +718,7 @@ class Worker:
         name: typing.Optional[str] = None,
         obj: typing.Optional[typing.Any] = None,
         verbose: typing.Optional[bool] = False,
+        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -705,7 +734,7 @@ class Worker:
         task = TaskType(task) if isinstance(task, str) else task
         if obj is not None:
             if task in {TaskType.default, TaskType.function}:
-                return Worker.add_function(_fx = obj, name = name, verbose = verbose)
+                return Worker.add_function(_fx = obj, name = name, verbose = verbose, **kwargs)
             if task == TaskType.cronjob:
                 return Worker.add_cronjob(_fx = obj, name = name, verbose = verbose, **kwargs)
             if task == TaskType.context:
@@ -715,7 +744,7 @@ class Worker:
         
         def wrapper(func: typing.Callable):
             if task in {TaskType.default, TaskType.function}:
-                return Worker.add_function(_fx = func, name = name, verbose = verbose)
+                return Worker.add_function(_fx = func, name = name, verbose = verbose, **kwargs)
             if task == TaskType.cronjob:
                 return Worker.add_cronjob(_fx = func, name = name, verbose = verbose, **kwargs)
             if task == TaskType.context:
