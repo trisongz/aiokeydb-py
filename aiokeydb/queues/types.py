@@ -56,6 +56,9 @@ class QueueStats(BaseModel):
     failed: typing.Optional[int] = 0
     aborted: typing.Optional[int] = 0
     retried: typing.Optional[int] = 0
+    num_workers: typing.Optional[int] = 0
+    active_workers: typing.Optional[typing.List[str]] = []
+    worker_attributes: typing.Optional[typing.Dict[str, typing.Dict[str, typing.Any]]] = {}
 
     @validator('uuid')
     def validate_uuid(cls, v):
@@ -105,6 +108,11 @@ class QueueStats(BaseModel):
     def abort_id_prefix(self) -> str:
         return f"{self.prefix}:{self.name}:abort"
     
+    @lazyproperty
+    def heartbeat_key(self) -> str:
+        return f"{self.prefix}:{self.name}:heartbeat"
+    
+
     def create_namespace(self, namespace: str) -> str:
         return f"{self.prefix}:{self.name}:{namespace}"
     
@@ -187,6 +195,8 @@ class Job(BaseModel):
     error: typing.Optional[str] = None
     status: JobStatus = JobStatus.NEW
     meta: typing.Dict = Field(default_factory=dict)
+    worker_id: typing.Optional[str] = None
+    worker_name: typing.Optional[str] = None
 
     def __repr__(self):
         kwargs = ", ".join(
@@ -206,6 +216,8 @@ class Job(BaseModel):
                 "error": self.error,
                 "status": self.status,
                 "meta": self.meta,
+                "worker_id": self.worker_id,
+                "worker_name": self.worker_name,
             }.items()
             if v is not None
         )
@@ -216,12 +228,22 @@ class Job(BaseModel):
         """
         Shortened representation of the job.
         """
-        return f"Job<function={self.function}, \
-            kwargs={self.kwargs}, \
-            status={self.status}, \
-            attempts={self.attempts}, \
-            queue={self.queue.queue_name}, \
-            id={self.id}>"
+        kwargs = ", ".join(
+            f"{k}={v}"
+            for k, v in {
+                "function": self.function,
+                "kwargs": self.kwargs,
+                "status": self.status,
+                "attempts": self.attempts,
+                "queue": self.queue.queue_name,
+                "id": self.id,
+                "worker_id": self.worker_id,
+                "worker_name": self.worker_name,
+            }.items()
+            if v is not None
+        )
+        return f"Job<{kwargs}>"
+    
 
     @property
     def log_repr(self):
@@ -396,4 +418,32 @@ class Job(BaseModel):
     @classmethod
     def get_fields(cls):
         return [field.name for field in cls.__fields__.values()]
+    
+    """
+    Queue Keys for Job
+    """
+
+    @lazyproperty
+    def queued_key(self) -> str:
+        if self.worker_id:
+            return f"{self.queue.queued_key}:{self.worker_id}"
+        if self.worker_name:
+            return f"{self.queue.queued_key}:{self.worker_name}"
+        return self.queue.queued_key
+    
+    @lazyproperty
+    def active_key(self) -> str:
+        if self.worker_id:
+            return f"{self.queue.active_key}:{self.worker_id}"
+        if self.worker_name:
+            return f"{self.queue.active_key}:{self.worker_name}"
+        return self.queue.active_key
+    
+    @lazyproperty
+    def incomplete_key(self) -> str:
+        if self.worker_id:
+            return f"{self.queue.incomplete_key}:{self.worker_id}"
+        if self.worker_name:
+            return f"{self.queue.incomplete_key}:{self.worker_name}"
+        return self.queue.incomplete_key
 

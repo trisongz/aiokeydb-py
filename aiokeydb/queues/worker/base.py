@@ -233,6 +233,8 @@ class Worker:
         threadpool_size: typing.Optional[int] = None,
         debug_enabled: typing.Optional[bool] = None,
         silenced_functions: typing.Optional[typing.List[str]] = None,
+        worker_attributes: typing.Optional[typing.Dict[str, typing.Any]] = None,
+        heartbeat_ttl: typing.Optional[int] = None,
     ):
         self.queue = queue
         self.settings = settings or get_settings()
@@ -261,6 +263,8 @@ class Worker:
             "stats": 10,
             "sweep": 180,
             "abort": 1,
+            "heartbeat": 10,
+            "broadcast": 10,
         }
         if timers: self.timers.update(timers)
         self.selectors = selectors or {}
@@ -272,6 +276,14 @@ class Worker:
         self.tasks: typing.Set[asyncio.Task] = set()
         self.job_task_contexts: typing.Dict['Job', typing.Dict[str, typing.Any]] = {}
         self.dequeue_timeout = dequeue_timeout
+        self.worker_attributes = worker_attributes or {}
+        self.worker_attributes.update({
+            # "name": self.name,
+            "selectors": self.selectors,
+            "worker_id": self.queue.uuid,
+            "queue_name": self.queue.queue_name,
+        })
+        self.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl is not None else self.queue.heartbeat_ttl
 
         for job in self.cron_jobs:
             resolve_croniter(required = True)
@@ -288,14 +300,16 @@ class Worker:
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
         if job:
             return logger.bind(
+                worker_name = self.name,
                 job_id=job.id,
                 status=job.status,
-                queue_name=getattr(job.queue, 'queue_name', self.queue.queue_name) or 'unknown queue',
+                queue_name = getattr(job.queue, 'queue_name', self.queue_name) or 'unknown queue',
                 kind=kind,
             )
         else:
             return logger.bind(
-                queue_name=self.queue.queue_name,
+                worker_name = self.name,
+                queue_name = self.queue_name,
                 kind=kind,
             )
 
@@ -310,14 +324,16 @@ class Worker:
 
     async def start(self):
         """Start processing jobs and upkeep tasks."""
-        self.logger(kind = "startup").info(f'Queue ID: {self.queue.uuid} @ {self.queue.uri} DB: {self.queue.db_id}')
+        self.logger(kind = "startup").info(f'Queue Name: {self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}')
         if not self.settings.worker_enabled:
             self.logger(kind = "startup").warning(
                 f'{self.settings.app_name or "KeyDBWorker"}: {self.name} is disabled.')
             return
 
+        self.worker_attributes['name'] = self.name
+        self.queue._worker_name = self.name
         self.logger(kind = "startup").info(
-            f'{self.settings.app_name or "KeyDBWorker"}: {self.name} | {self.settings.app_version} | Build ID: {self.settings.build_id}')
+            f'{self.settings.app_name or "KeyDBWorker"}: {self.name} | WorkerID: {self.worker_id} | {self.settings.app_version} | Build ID: {self.settings.build_id} | Worker Attributes: {self.worker_attributes}')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -336,7 +352,10 @@ class Worker:
                 )
 
             # Register the queue
-            await self.queue.register_queue()
+            # await self.queue.register_queue()
+            # Send the first heartbeat
+            await self.heartbeat()
+
             self.tasks.update(await self.upkeep())
             for _ in range(self.concurrency):
                 self._process()
@@ -376,10 +395,20 @@ class Worker:
             )
 
         scheduled = await self.queue.schedule(lock)
-        if scheduled:
+        if scheduled and self.queue.verbose_results:
             self.logger(kind = "scheduled").info(
                 f'↻ node={self.queue.node_name}, {scheduled}'
             )
+
+    async def heartbeat(self, ttl: int = 10):
+        """
+        Send a heartbeat to the queue.
+        """
+        await self.queue.add_heartbeat(
+            worker_id = self.worker_id,
+            worker_attributes = self.worker_attributes,
+            heartbeat_ttl = ttl,
+        )
 
     async def upkeep(self):
         """Start various upkeep tasks async."""
@@ -387,7 +416,10 @@ class Worker:
         async def poll(func, sleep, arg=None):
             while not self.event.is_set():
                 try:
-                    await func(arg or sleep)
+                    if asyncio.iscoroutinefunction(func):
+                        await func(arg or sleep)
+                    else:
+                        func(arg or sleep)
                 except (Exception, asyncio.CancelledError):
                     if self.event.is_set():
                         return
@@ -402,6 +434,11 @@ class Worker:
             asyncio.create_task(
                 poll(self.queue.stats, self.timers["stats"], self.timers["stats"] + 1)
             ),
+            asyncio.create_task(
+                poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
+            ),
+            asyncio.create_task(poll(self._broadcast_process, self.timers["broadcast"])
+            )
         ]
 
     async def abort(self, abort_threshold: int):
@@ -426,16 +463,32 @@ class Worker:
 
             await job.finish(JobStatus.ABORTED, error = abort.decode("utf-8"))
             await self.queue.ctx.async_delete(job.abort_id)
-            self.logger(job = job, kind = "abort").info(f"⊘ {job.duration('running')}ms, node={self.queue.node_name}, func={job.function}, id={job.id}")
+            self.logger(job = job, kind = "abort").info(f"⊘ {job.duration('running')}ms, node={self.node_name}, func={job.function}, id={job.id}")
     
-    async def process(self):
+    async def process(self, broadcast: typing.Optional[bool] = False):
+        # sourcery skip: low-code-quality
         # pylint: disable=too-many-branches
         job, context = None, None
         try:
             with contextlib.suppress(ConnectionError):
-                job = await self.queue.dequeue(self.dequeue_timeout)
+                job = await self.queue.dequeue(
+                    self.dequeue_timeout, 
+                    worker_id = self.worker_id if broadcast else None, 
+                    worker_name = self.name if broadcast else None,
+                )
 
             if not job: return
+            if job.worker_id and job.worker_id != self.worker_id:
+                if self.debug_enabled or self.queue.verbose_results:
+                    self.logger(job = job, kind = "process").info(f"⊘ Rejected job, queued_key={job.queued_key}, func={job.function}, id={job.id} | worker_id={job.worker_id} != {self.worker_id}")
+                return
+            if job.worker_name and job.worker_name != self.name:
+                if self.debug_enabled or self.queue.verbose_results:
+                    self.logger(job = job, kind = "process").info(f"⊘ Rejected job, queued_key={job.queued_key}, func={job.function}, id={job.id} | worker_name={job.worker_name} != {self.name}")
+                return
+                
+            if job.worker_name or job.worker_id and (self.debug_enabled or self.queue.verbose_results):
+                self.logger(job = job, kind = "process").info(f"☑ Accepted job, func={job.function}, id={job.id}, worker_name={job.worker_name}, worker_id={job.worker_id}")
 
             job.started = now()
             job.status = JobStatus.ACTIVE
@@ -445,7 +498,7 @@ class Worker:
             await self._before_process(context)
             if job.function not in self.silenced_functions:
                 self.logger(job = job, kind = "process").info(
-                    f"← duration={job.duration('running')}ms, node={self.queue.node_name}, func={job.function}"
+                    f"← duration={job.duration('running')}ms, node={self.node_name}, func={job.function}"
                 )
                 
 
@@ -479,6 +532,15 @@ class Worker:
             new_task = asyncio.create_task(self.process())
             self.tasks.add(new_task)
             new_task.add_done_callback(self._process)
+    
+    def _broadcast_process(self, previous_task = None):
+        if previous_task and isinstance(previous_task, asyncio.Task):
+            self.tasks.discard(previous_task)
+
+        if not self.event.is_set():
+            new_task = asyncio.create_task(self.process(broadcast=True))
+            self.tasks.add(new_task)
+            new_task.add_done_callback(self._broadcast_process)
 
     """
     Static Methods to add functions and context to the worker queue.
@@ -788,7 +850,27 @@ class Worker:
         return cls(**settings)
 
 
+    """
+    Properties
+    """
+    @property
+    def worker_id(self) -> str:
+        """
+        Returns a unique worker id.
+        """
+        return self.queue.uuid
 
+    @property
+    def queue_name(self) -> str:
+        """
+        Returns the queue name.
+        """
+        return self.queue.queue_name
 
-
-        
+    @property
+    def node_name(self) -> str:
+        """
+        Returns the node name.
+        """
+        return self.queue.node_name
+    

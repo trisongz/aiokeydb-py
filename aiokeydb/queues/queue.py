@@ -28,6 +28,7 @@ from aiokeydb.queues.utils import (
     uuid4,
     get_default_job_key,
     get_settings,
+    ensure_coroutine_function,
 )
 
 from lazyops.imports._aiohttpx import (
@@ -81,6 +82,7 @@ class TaskQueue:
         truncate_logs: typing.Optional[bool] = True,
         logging_max_length: typing.Optional[int] = 500,
         silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
+        heartbeat_ttl: typing.Optional[int] = 10,
         **kwargs
     ):
     
@@ -128,6 +130,8 @@ class TaskQueue:
         self.truncate_logs = truncate_logs
         self.logging_max_length = logging_max_length
         self.silenced_functions = silenced_functions or []
+        self.heartbeat_ttl = heartbeat_ttl
+        self._worker_name: str = None
         if not self.silenced_functions:
             self._set_silenced_functions()
     
@@ -143,13 +147,15 @@ class TaskQueue:
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
         if job:
             return logger.bind(
-                job_id=job.id,
-                status=job.status,
-                queue_name=getattr(job.queue, 'queue_name', None) or 'unknown queue',
-                kind=kind,
+                job_id = job.id,
+                status = job.status,
+                worker_name = self._worker_name,
+                queue_name = getattr(job.queue, 'queue_name', None) or 'unknown queue',
+                kind = kind,
             )
         else:
             return logger.bind(
+                worker_name = self._worker_name,
                 queue_name = self.queue_name,
                 kind = kind,
             )
@@ -250,16 +256,16 @@ class TaskQueue:
                     if job.function in self.silenced_functions:
                         pass
                     elif self.verbose_results:
-                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}, result={job.result}")
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job.result}")
                     elif self.truncate_logs:
                         job_result = (
                             f'{str(job.result)[:self.logging_max_length]}...'
                             if self.logging_max_length
                             else str(job.result)
                         )
-                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}, result={job_result}")
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
                     else:
-                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self._node_name}, func={job.function}")
+                        self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
         return swept
 
     async def listen(self, job_keys: typing.List[str], callback: typing.Callable, timeout: int = 10):
@@ -271,6 +277,7 @@ class TaskQueue:
         timeout: if timeout is truthy, wait for timeout seconds
         """
         pubsub = self.ctx.async_client.pubsub()
+        
         job_ids = [self.job_id(job_key) for job_key in job_keys]
         await pubsub.subscribe(*job_ids)
 
@@ -328,8 +335,8 @@ class TaskQueue:
         async with self._op_sem:
             async with self.ctx.async_client.pipeline(transaction = True) as pipe:
                 dequeued, *_ = await (
-                    pipe.lrem(self.queued_key, 0, job.id)
-                    .zrem(self.incomplete_key, job.id)
+                    pipe.lrem(job.queued_key, 0, job.id)
+                    .zrem(job.incomplete_key, job.id)
                     .expire(job.id, ttl + 1)
                     .setex(job.abort_id, ttl, error)
                     .execute()
@@ -339,7 +346,7 @@ class TaskQueue:
                 await job.finish(JobStatus.ABORTED, error = error)
                 await self.ctx.async_delete(job.abort_id)
             else:
-                await self.ctx.async_lrem(self.active_key, 0, job.id)
+                await self.ctx.async_lrem(job.active_key, 0, job.id)
 
 
     async def retry(self, job: Job, error: typing.Any):
@@ -355,15 +362,16 @@ class TaskQueue:
         job.touched = now()
         next_retry_delay = job.next_retry_delay()
 
+
         async with self.ctx.async_client.pipeline(transaction=True) as pipe:
-            pipe = pipe.lrem(self._stats.active_key, 1, job_id)
-            pipe = pipe.lrem(self._stats.queued_key, 1, job_id)
+            pipe = pipe.lrem(job.active_key, 1, job_id)
+            pipe = pipe.lrem(job.queued_key, 1, job_id)
             if next_retry_delay:
                 scheduled = time.time() + next_retry_delay
-                pipe = pipe.zadd(self.incomplete_key, {job_id: scheduled})
+                pipe = pipe.zadd(job.incomplete_key, {job_id: scheduled})
             else:
-                pipe = pipe.zadd(self.incomplete_key, {job_id: job.scheduled})
-                pipe = pipe.rpush(self.queued_key, job_id)
+                pipe = pipe.zadd(job.incomplete_key, {job_id: job.scheduled})
+                pipe = pipe.rpush(job.queued_key, job_id)
             await pipe.set(job_id, self.serialize(job)).execute()
             self.retried += 1
             await self.notify(job)
@@ -391,8 +399,7 @@ class TaskQueue:
             job.progress = 1.0
 
         async with self.ctx.async_client.pipeline(transaction=True) as pipe:
-            pipe = pipe.lrem(self.active_key, 1, job_id).zrem(self.incomplete_key, job_id)
-
+            pipe = pipe.lrem(job.active_key, 1, job_id).zrem(job.incomplete_key, job_id)
             if job.ttl > 0:
                 pipe = pipe.setex(job_id, job.ttl, self.serialize(job))
             elif job.ttl == 0:
@@ -426,19 +433,41 @@ class TaskQueue:
                 )
                 self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
 
-
-    async def dequeue(self, timeout=0):
+    async def _dequeue_job_id(
+        self,
+        timeout: int = 0,
+        postfix: str = None,
+    ):
+        """
+        Dequeue a job from the queue.
+        """
+        queued_key, active_key = self.queued_key, self.active_key
+        if postfix:
+            queued_key = f'{self.queued_key}:{postfix}'
+            active_key = f'{self.active_key}:{postfix}'
         if await self.version() < (6, 2, 0):
-            job_id = await self.ctx.async_client.brpoplpush(self.queued_key, self.active_key, timeout)
-        else:
-            job_id = await self.ctx.async_client.execute_command(
-                "BLMOVE", self.queued_key, self.active_key, "RIGHT", "LEFT", timeout
-            )
+            return await self.ctx.async_client.brpoplpush(queued_key, active_key, timeout)
+        return await self.ctx.async_client.execute_command(
+            "BLMOVE", queued_key, active_key, "RIGHT", "LEFT", timeout
+        )
+
+    async def dequeue(self, timeout = 0, worker_id: str = None, worker_name: str = None):
+        job_id = await self._dequeue_job_id(timeout) if \
+            worker_id is None and worker_name is None else None
+        
+        if job_id is None and worker_id:
+            job_id = await self._dequeue_job_id(timeout, worker_id)
+            
+        if job_id is None and worker_name:
+            job_id = await self._dequeue_job_id(timeout, worker_name)
+        
         if job_id is not None:
+            # logger.info(f'Fetched job id {job_id}: {queued_key}: {active_key}')
             return await self._get_job_by_id(job_id)
 
         self.logger(kind="dequeue").info("Dequeue timed out")
         return None
+    
     
     async def _deferred(
         self, 
@@ -524,7 +553,7 @@ class TaskQueue:
 
         async with self._op_sem:
             if not await self._enqueue_script(
-                    keys=[self.incomplete_key, job.id, self.queued_key, job.abort_id],
+                    keys=[job.incomplete_key, job.id, job.queued_key, job.abort_id],
                     args=[self.serialize(job), job.scheduled],
                     client = self.ctx.async_client,
             ):
@@ -553,6 +582,13 @@ class TaskQueue:
         self, 
         job_or_func: typing.Union[Job, str],
         timeout: int = None, 
+        broadcast: typing.Optional[bool] = None,
+        worker_names: typing.Optional[typing.List[str]] = None,
+        worker_selector: typing.Optional[typing.Callable] = None,
+        worker_selector_args: typing.Optional[typing.List] = None,
+        worker_selector_kwargs: typing.Optional[typing.Dict] = None,
+        workers_selected: typing.Optional[typing.List[typing.Dict[str, str]]] = None,
+        return_all_results: typing.Optional[bool] = False,
         **kwargs
     ):
         """
@@ -569,9 +605,167 @@ class TaskQueue:
 
         job_or_func: Same as Queue.enqueue
         kwargs: Same as Queue.enqueue
+        timeout: How long to wait for the job to complete before raising a TimeoutError
+        broadcast: Broadcast the job to all workers. If True, the job will be run on all workers.
+        worker_names: List of worker names to run the job on. If provided, will run on these specified workers.
+        worker_selector: Function that takes in a list of workers and returns a list of workers to run the job on. If provided, worker_names will be ignored.
         """
-        results = await self.map(job_or_func, timeout=timeout, iter_kwargs=[kwargs])
-        return results[0]
+        results = await self.map(
+            job_or_func, 
+            timeout = timeout, 
+            iter_kwargs = [kwargs],
+            broadcast = broadcast,
+            worker_names = worker_names,
+            worker_selector = worker_selector,
+            worker_selector_args = worker_selector_args,
+            worker_selector_kwargs = worker_selector_kwargs,
+            workers_selected = workers_selected,
+        )
+        return results if return_all_results else results[0]
+    
+    async def select_workers(
+        self,
+        func: typing.Callable,
+        *args,
+        **kwargs,
+    ) -> typing.List[typing.Dict[str, str]]:
+        """
+        Passes the dict of the worker attributes to the 
+        provided function and returns a list of workers that
+        are able to run the job.
+
+        Function should expect kw: `worker_attributes`: Dict[str, Dict[str, Any]]
+        and should return List[Dict[str, str]] where the Dict is either
+            {'worker_id': str}
+        or
+            {'worker_name': str}
+        """
+        await self.prepare_for_broadcast()
+        func = ensure_coroutine_function(func)
+        return await func(
+            *args,
+            worker_attributes = self.worker_attributes,
+            **kwargs
+        )
+
+    async def prepare_job_kws(
+        self,
+        iter_kwargs: typing.Iterable[typing.Dict], 
+        timeout: int = None,
+        broadcast: typing.Optional[bool] = False,
+        worker_names: typing.Optional[typing.List[str]] = None,
+        worker_selector: typing.Optional[typing.Callable] = None,
+        worker_selector_args: typing.Optional[typing.List] = None,
+        worker_selector_kwargs: typing.Optional[typing.Dict] = None,
+        workers_selected: typing.Optional[typing.List[typing.Dict[str, str]]] = None,
+        **kwargs
+    ) -> typing.Tuple[typing.List[typing.Dict[str, typing.Any]], typing.Optional[typing.List[typing.Dict[str, str]]]]:
+        """
+        Prepare jobs for broadcast or map.
+
+        Returns:
+            iter_kwargs: List of kwargs to pass to the job
+            worker_kws: List of worker kwargs to pass to the job
+        """
+        if (
+            not broadcast
+            and not worker_selector
+            and not worker_names
+            and not workers_selected
+        ):
+            return [
+                {
+                    "timeout": timeout,
+                    "key": kwargs.get("key") or get_default_job_key(),
+                    **kwargs,
+                    **kw,
+                }
+                for kw in iter_kwargs
+            ], None
+        if workers_selected: worker_kws = workers_selected
+        elif worker_selector:
+            worker_selector_args = worker_selector_args or []
+            worker_selector_kwargs = worker_selector_kwargs or {}
+            worker_kws = await self.select_workers(worker_selector, *worker_selector_args, **worker_selector_kwargs)
+        elif worker_names: worker_kws = [{"worker_name": worker_name} for worker_name in worker_names]
+
+        else:
+            await self.prepare_for_broadcast()
+            worker_kws = [{"worker_id": worker_id} for worker_id in self.active_workers]
+
+        broadcast_kwargs = []
+        for kw in iter_kwargs:
+            broadcast_kwargs.extend(
+                {
+                    "timeout": timeout,
+                    "key": get_default_job_key(),
+                    **kwargs,
+                    **kw,
+                    **worker_kw,
+                }
+                for worker_kw in worker_kws
+            )
+        return broadcast_kwargs, worker_kws
+
+    async def broadcast(
+        self,
+        job_or_func: typing.Union[Job, str],
+        timeout: int = None,
+        enqueue: typing.Optional[bool] = True,
+        worker_names: typing.Optional[typing.List[str]] = None,
+        worker_selector: typing.Optional[typing.Callable] = None,
+        worker_selector_args: typing.Optional[typing.List] = None,
+        worker_selector_kwargs: typing.Optional[typing.Dict] = None,
+        workers_selected: typing.Optional[typing.List[typing.Dict[str, str]]] = None,
+        **kwargs
+    ):
+        """
+        Broadcast a job to all nodes and collect all of their results.
+        
+        job_or_func: Same as Queue.enqueue
+        kwargs: Same as Queue.enqueue
+        timeout: How long to wait for the job to complete before raising a TimeoutError
+        worker_names: List of worker names to run the job on. If provided, will run on these specified workers.
+        worker_selector: Function that takes in a list of workers and returns a list of workers to run the job on. If provided, worker_names will be ignored.
+        """
+
+        if not enqueue:
+            return await self.map(
+                job_or_func, 
+                timeout = timeout, 
+                iter_kwargs = [kwargs], 
+                broadcast = True, 
+                worker_names = worker_names,
+                worker_selector = worker_selector,
+                worker_selector_args = worker_selector_args,
+                worker_selector_kwargs = worker_selector_kwargs,
+                workers_selected = workers_selected,
+            )
+    
+        iter_kwargs, worker_kws = await self.prepare_job_kws(
+            iter_kwargs = [kwargs], 
+            timeout = timeout, 
+            broadcast = True, 
+            worker_names = worker_names, 
+            worker_selector = worker_selector,
+            worker_selector_args = worker_selector_args,
+            worker_selector_kwargs = worker_selector_kwargs,
+            workers_selected = workers_selected,
+            **kwargs
+        )
+        # if worker_kws:
+        #     # logger.info(f"Enqueueing {job_or_func} to {len(worker_kws)} workers: {worker_kws}: {iter_kwargs}")
+        jobs: typing.List[Job] = []
+        for kw in iter_kwargs:
+            jobs.append(
+                await self.enqueue(
+                    job_or_func,
+                    **kw
+                )
+            )
+        return jobs
+
+
 
     async def map(
         self, 
@@ -579,6 +773,12 @@ class TaskQueue:
         iter_kwargs: typing.Iterable[typing.Dict], 
         timeout: int = None, 
         return_exceptions: bool = False, 
+        broadcast: typing.Optional[bool] = False,
+        worker_names: typing.Optional[typing.List[str]] = None,
+        worker_selector: typing.Optional[typing.Callable] = None,
+        worker_selector_args: typing.Optional[typing.List] = None,
+        worker_selector_kwargs: typing.Optional[typing.Dict] = None,
+        workers_selected: typing.Optional[typing.List[typing.Dict[str, str]]] = None,
         **kwargs
     ):
         """
@@ -603,17 +803,23 @@ class TaskQueue:
         return_exceptions: If False (default), an exception is immediately raised as soon as any jobs
             fail. Other jobs won't be cancelled and will continue to run.
             If True, exceptions are treated the same as successful results and aggregated in the result list.
+        broadcast: If True, broadcast the job to all nodes. Otherwise, only enqueue the job on this node.
         kwargs: Default kwargs for all jobs. These will be overridden by those in iter_kwargs.
         """
-        iter_kwargs = [
-            {
-                "timeout": timeout,
-                "key": kwargs.get("key") or get_default_job_key(),
-                **kwargs,
-                **kw,
-            }
-            for kw in iter_kwargs
-        ]
+        iter_kwargs, worker_kws = await self.prepare_job_kws(
+            iter_kwargs = iter_kwargs, 
+            timeout = timeout, 
+            broadcast = broadcast, 
+            worker_names = worker_names, 
+            worker_selector = worker_selector, 
+            workers_selected = workers_selected,
+            worker_selector_args = worker_selector_args,
+            worker_selector_kwargs = worker_selector_kwargs,
+            **kwargs
+        )
+        if worker_kws and (self.verbose_results or self.debug_enabled):
+            logger.info(f"Broadcasting {job_or_func} to {len(worker_kws)} workers: {worker_kws}")
+            
         job_keys = [key["key"] for key in iter_kwargs]
         pending_job_keys = set(job_keys)
         async def callback(job_key, status):
@@ -652,6 +858,8 @@ class TaskQueue:
                 results.append(exc)
             else: results.append(job.result)
         return results
+
+
     """
     Batch Methods
     """
@@ -959,22 +1167,68 @@ class TaskQueue:
                 .execute()
             )
         return stats
+    
 
-    async def count(self, kind: str):
+    async def add_heartbeat(
+        self, 
+        worker_id: str, 
+        worker_attributes: typing.Dict[str, typing.Any] = None,
+        heartbeat_ttl: typing.Optional[int] = None,
+    ):
+        """
+        Registers a heartbeat for the current worker.
+        """
+        current = now()
+        worker_attributes = worker_attributes or {}
+        heartbeat_ttl = heartbeat_ttl or self.heartbeat_ttl
+        async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+            key = self.create_namespace(f"worker:attr:{worker_id}")
+            await (
+                pipe.setex(key, heartbeat_ttl, json.dumps(worker_attributes))
+                .zremrangebyscore(self.heartbeat_key, 0, current)
+                .zadd(self.heartbeat_key, {worker_id: current + millis(heartbeat_ttl)})
+                .expire(self.heartbeat_key, heartbeat_ttl)
+                .execute()
+            )
+        # self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
+        # self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(heartbeat_ttl)))]
+        # logger.info(f"Active workers: {self.active_workers}")
+
+
+    async def count(self, kind: str, postfix: typing.Optional[str] = None):
         if kind == "queued":
-            return await self.ctx.async_llen(self.queued_key)
+            return await self.ctx.async_llen(f"{self.queued_key}:{postfix}" if postfix else self.queued_key)
         if kind == "active":
-            return await self.ctx.async_llen(self.active_key)
+            return await self.ctx.async_llen(f"{self.active_key}:{postfix}" if postfix else self.active_key)
         if kind == "scheduled":
-            return await self.ctx.async_zcount(self.scheduled_key, 1, "inf")
+            return await self.ctx.async_zcount(f"{self.scheduled_key}:{postfix}" if postfix else self.scheduled_key, 1, "inf")
         if kind == "incomplete":
-            return await self.ctx.async_zcard(self.incomplete_key)
-        raise ValueError(f"Can't count unknown type {kind}")
+            return await self.ctx.async_zcard(f"{self.incomplete_key}:{postfix}" if postfix else self.incomplete_key)
+        raise ValueError(f"Can't count unknown type {kind} {postfix}")
 
 
     """
     Metrics Handler
     """
+    async def prepare_for_broadcast(self, ttl: typing.Optional[int] = None):
+        """
+        Fetches the current workers
+        """
+        current = now()
+        ttl = ttl or self.heartbeat_ttl
+        self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
+        self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(ttl)))]
+        worker_data = await self.ctx.async_mget(
+            self.create_namespace(f"worker:attr:{worker_id}") for worker_id in self.active_workers
+        )
+        self.worker_attributes = {
+            worker_id: json.loads(worker_attr.decode("UTF-8"))
+            for worker_id, worker_attr in zip(self.active_workers, worker_data)
+            if worker_attr
+        }
+        # logger.info(f"Active workers: {self.active_workers}: {self.worker_attributes}")
+        
+
     async def prepare_queue_metrics(
         self, 
         worker_info: typing.Optional[typing.Dict[str, typing.Any]] = None,
@@ -1089,6 +1343,8 @@ class TaskQueue:
     def retried(self) -> int: return self._stats.retried
     @lazyproperty
     def aborted(self) -> int: return self._stats.aborted
+    @lazyproperty
+    def num_workers(self) -> int: return self._stats.num_workers
     
     # Key Namespaces
     @lazyproperty
@@ -1110,7 +1366,14 @@ class TaskQueue:
     @lazyproperty
     def management_queue_key(self) -> str: return self._stats.management_queue_key
     @lazyproperty
+    def heartbeat_key(self) -> str: return self._stats.heartbeat_key
+    @lazyproperty
     def abort_id_prefix(self) -> str: return self._stats.abort_id_prefix
+
+    @lazyproperty
+    def active_workers(self) -> typing.List[str]: return self._stats.active_workers
+    @lazyproperty
+    def worker_attributes(self) -> typing.Dict[str, typing.Dict[str, typing.Any]]: return self._stats.worker_attributes
 
     def create_namespace(self, key: str) -> str: return self._stats.create_namespace(key)
 
