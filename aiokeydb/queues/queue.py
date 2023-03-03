@@ -128,7 +128,14 @@ class TaskQueue:
         self.truncate_logs = truncate_logs
         self.logging_max_length = logging_max_length
         self.silenced_functions = silenced_functions or []
+        if not self.silenced_functions:
+            self._set_silenced_functions()
     
+    def _set_silenced_functions(self):
+        from aiokeydb.queues.worker import WorkerTasks
+        self.silenced_functions = list(set(WorkerTasks.silenced_functions))
+
+
     def add_silenced_functions(self, *functions):
         self.silenced_functions.extend(functions)
         self.silenced_functions = list(set(self.silenced_functions))

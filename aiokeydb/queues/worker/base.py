@@ -240,7 +240,7 @@ class Worker:
         self.concurrency = concurrency if concurrency is not None else self.settings.worker.concurrency
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
 
-        self.silenced_functions = silenced_functions or list(set(WorkerTasks.silenced_functions))
+        self.silenced_functions = silenced_functions if silenced_functions is not None else list(set(WorkerTasks.silenced_functions))
         self.queue.add_silenced_functions(*self.silenced_functions)
 
         self.startup = startup or [
@@ -330,6 +330,10 @@ class Worker:
             self.logger(kind = "startup").info(
                 f"Registered {len(self.functions)} functions, {len(self.cron_jobs)} cron jobs, {self.concurrency} concurrency. Functions: {list(self.functions.keys())}"
             )
+            if self.silenced_functions:
+                self.logger(kind = "startup").info(
+                    f"Silenced functions: {self.silenced_functions}"
+                )
 
             # Register the queue
             await self.queue.register_queue()
@@ -439,10 +443,11 @@ class Worker:
             await job.update()
             context = {**self.context, "job": job}
             await self._before_process(context)
-            self.logger(job = job, kind = "process").info(
-                f"← duration={job.duration('running')}ms, node={self.queue.node_name}, func={job.function}"
-            )
-            
+            if job.function not in self.silenced_functions:
+                self.logger(job = job, kind = "process").info(
+                    f"← duration={job.duration('running')}ms, node={self.queue.node_name}, func={job.function}"
+                )
+                
 
             function = ensure_coroutine_function(self.functions[job.function])
             task = asyncio.create_task(function(context, **(job.kwargs or {})))
@@ -528,7 +533,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.context_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered context function {func_name}: {func}")
-            if silenced is True: WorkerTasks.silenced_functions.append(name)
+            if silenced is True: WorkerTasks.silenced_functions.append(func_name)
             return func
         
         return wrapper
@@ -569,7 +574,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.dependencies[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered depency{func_name}: {func}")
-            if silenced is True: WorkerTasks.silenced_functions.append(name)
+            if silenced is True: WorkerTasks.silenced_functions.append(func_name)
             return func
         
         return wrapper
@@ -614,7 +619,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.startup_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered startup function {func_name}: {func}")
-            if silenced is True: WorkerTasks.silenced_functions.append(name)
+            if silenced is True: WorkerTasks.silenced_functions.append(func_name)
             # logger.info(f"Registered startup function {func_name}: {func}: {kwargs}")
             return func
         
@@ -642,7 +647,7 @@ class Worker:
             func_name = name or func.__name__
             WorkerTasks.shutdown_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered shutdown function {func_name}: {func}")
-            if silenced is True: WorkerTasks.silenced_functions.append(name)
+            if silenced is True: WorkerTasks.silenced_functions.append(func_name)
             return func
         return decorator
 
@@ -677,7 +682,7 @@ class Worker:
             WorkerTasks.functions.append(func)
             if verbose:
                 logger.info(f"Registered function {func.__name__}")
-            if silenced is True: WorkerTasks.silenced_functions.append(name)
+            if silenced is True: WorkerTasks.silenced_functions.append(func.__name__)
             return func
         
         return decorator
@@ -718,7 +723,6 @@ class Worker:
         name: typing.Optional[str] = None,
         obj: typing.Optional[typing.Any] = None,
         verbose: typing.Optional[bool] = False,
-        silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
