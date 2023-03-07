@@ -47,6 +47,7 @@ from aiokeydb.exceptions import (
     ResponseError,
     TimeoutError,
 )
+from aiokeydb.credentials import CredentialProvider
 from aiokeydb.typing import EncodableT, EncodedT
 from aiokeydb.utils import HIREDIS_AVAILABLE, str_if_bytes
 
@@ -87,6 +88,14 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "types, can't unload"
 )
 
+NO_AUTH_SET_ERROR = {
+    # Redis >= 6.0
+    "AUTH <password> called without any password "
+    "configured for the default user. Are you sure "
+    "your configuration is correct?": AuthenticationError,
+    # Redis < 6.0
+    "Client sent AUTH, but no password is set": AuthenticationError,
+}
 
 class _HiredisReaderArgs(TypedDict, total=False):
     protocolError: Callable[[str], Exception]
@@ -139,10 +148,11 @@ class Encoder:
 ExceptionMappingT = Mapping[str, Union[Type[Exception], Mapping[str, Type[Exception]]]]
 
 
+
 class BaseParser:
     """Plain Python parsing class"""
 
-    __slots__ = "_stream", "_buffer", "_read_size"
+    __slots__ = "_stream", "_read_size"
 
     EXCEPTION_CLASSES: ExceptionMappingT = {
         "ERR": {
@@ -159,7 +169,9 @@ class BaseParser:
             MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
             NO_SUCH_MODULE_ERROR: ModuleError,
             MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
+            **NO_AUTH_SET_ERROR,
         },
+        "WRONGPASS": AuthenticationError,
         "EXECABORT": ExecAbortError,
         "LOADING": BusyLoadingError,
         "NOSCRIPT": NoScriptError,
@@ -170,7 +182,6 @@ class BaseParser:
 
     def __init__(self, socket_read_size: int):
         self._stream: Optional[asyncio.StreamReader] = None
-        self._buffer: Optional[SocketBuffer] = None
         self._read_size = socket_read_size
 
     def __del__(self):
@@ -196,7 +207,7 @@ class BaseParser:
     def on_connect(self, connection: "AsyncConnection"):
         raise NotImplementedError()
 
-    async def can_read(self, timeout: float) -> bool:
+    async def can_read_destructive(self) -> bool:
         raise NotImplementedError()
 
     async def read_response(
@@ -205,154 +216,22 @@ class BaseParser:
         raise NotImplementedError()
 
 
-class SocketBuffer:
-    """Async-friendly re-impl of redis-py's SocketBuffer.
-
-    TODO: We're currently passing through two buffers,
-        the asyncio.StreamReader and this. I imagine we can reduce the layers here
-        while maintaining compliance with prior art.
-    """
-
-    def __init__(
-        self,
-        stream_reader: asyncio.StreamReader,
-        socket_read_size: int,
-        socket_timeout: Optional[float],
-    ):
-        self._stream: Optional[asyncio.StreamReader] = stream_reader
-        self.socket_read_size = socket_read_size
-        self.socket_timeout = socket_timeout
-        self._buffer: Optional[io.BytesIO] = io.BytesIO()
-        # number of bytes written to the buffer from the socket
-        self.bytes_written = 0
-        # number of bytes read from the buffer
-        self.bytes_read = 0
-
-    @property
-    def length(self):
-        return self.bytes_written - self.bytes_read
-
-    async def _read_from_socket(
-        self,
-        length: Optional[int] = None,
-        timeout: Union[float, None, _Sentinel] = SENTINEL,
-        raise_on_timeout: bool = True,
-    ) -> bool:
-        buf = self._buffer
-        if buf is None or self._stream is None:
-            raise KeyDBError("Buffer is closed.")
-        buf.seek(self.bytes_written)
-        marker = 0
-        timeout = timeout if timeout is not SENTINEL else self.socket_timeout
-
-        try:
-            while True:
-                async with async_timeout.timeout(timeout):
-                    data = await self._stream.read(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if isinstance(data, bytes) and len(data) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                buf.write(data)
-                data_length = len(data)
-                self.bytes_written += data_length
-                marker += data_length
-
-                if length is not None and length > marker:
-                    continue
-                return True
-        except (socket.timeout, asyncio.TimeoutError):
-            if raise_on_timeout:
-                raise TimeoutError("Timeout reading from socket")
-            return False
-        except NONBLOCKING_EXCEPTIONS as ex:
-            # if we're in nonblocking mode and the recv raises a
-            # blocking error, simply return False indicating that
-            # there's no data to be read. otherwise raise the
-            # original exception.
-            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
-            raise ConnectionError(f"Error while reading from socket: {ex.args}")
-
-    async def can_read(self, timeout: float) -> bool:
-        return bool(self.length) or await self._read_from_socket(
-            timeout=timeout, raise_on_timeout=False
-        )
-
-    async def read(self, length: int) -> bytes:
-        length = length + 2  # make sure to read the \r\n terminator
-        # make sure we've read enough data from the socket
-        if length > self.length:
-            await self._read_from_socket(length - self.length)
-
-        if self._buffer is None:
-            raise KeyDBError("Buffer is closed.")
-
-        self._buffer.seek(self.bytes_read)
-        data = self._buffer.read(length)
-        self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
-
-        return data[:-2]
-
-    async def readline(self) -> bytes:
-        buf = self._buffer
-        if buf is None:
-            raise KeyDBError("Buffer is closed.")
-
-        buf.seek(self.bytes_read)
-        data = buf.readline()
-        while not data.endswith(SYM_CRLF):
-            # there's more data in the socket that we need
-            await self._read_from_socket()
-            buf.seek(self.bytes_read)
-            data = buf.readline()
-
-        self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
-
-        return data[:-2]
-
-    def purge(self):
-        if self._buffer is None:
-            raise KeyDBError("Buffer is closed.")
-
-        self._buffer.seek(0)
-        self._buffer.truncate()
-        self.bytes_written = 0
-        self.bytes_read = 0
-
-    def close(self):
-        try:
-            self.purge()
-            self._buffer.close()
-        except Exception:
-            # issue #633 suggests the purge/close somehow raised a
-            # BadFileDescriptor error. Perhaps the client ran out of
-            # memory or something else? It's probably OK to ignore
-            # any error being raised from purge/close since we're
-            # removing the reference to the instance below.
-            pass
-        self._buffer = None
-        self._stream = None
-
 
 class PythonParser(BaseParser):
     """Plain Python parsing class"""
 
-    __slots__ = BaseParser.__slots__ + ("encoder",)
+    __slots__ = BaseParser.__slots__ + ("encoder", "_buffer", "_pos", "_chunks")
 
     def __init__(self, socket_read_size: int):
         super().__init__(socket_read_size)
         self.encoder: Optional[Encoder] = None
+        self._buffer = b""
+        self._chunks = []
+        self._pos = 0
+
+    def _clear(self):
+        self._buffer = b""
+        self._chunks.clear()
 
     def on_connect(self, connection: "AsyncConnection"):
         """Called when the stream connects"""
@@ -360,31 +239,43 @@ class PythonParser(BaseParser):
         if self._stream is None:
             raise KeyDBError("Buffer is closed.")
 
-        self._buffer = SocketBuffer(
-            self._stream, self._read_size, connection.socket_timeout
-        )
         self.encoder = connection.encoder
 
     def on_disconnect(self):
         """Called when the stream disconnects"""
         if self._stream is not None:
             self._stream = None
-        if self._buffer is not None:
-            self._buffer.close()
-            self._buffer = None
         self.encoder = None
+        self._clear()
 
-    async def can_read(self, timeout: float):
-        return self._buffer and bool(await self._buffer.can_read(timeout))
+    async def can_read_destructive(self) -> bool:
+        if self._buffer:
+            return True
+        if self._stream is None:
+            raise KeyDBError("Buffer is closed.")
+        try:
+            async with async_timeout.timeout(0):
+                return await self._stream.read(1)
+        except asyncio.TimeoutError:
+            return False
 
-    async def read_response(
+    async def read_response(self, disable_decoding: bool = False):
+        if self._chunks:
+            # augment parsing buffer with previously read data
+            self._buffer += b"".join(self._chunks)
+            self._chunks.clear()
+        self._pos = 0
+        response = await self._read_response(disable_decoding=disable_decoding)
+        # Successfully parsing a response allows us to clear our parsing buffer
+        self._clear()
+        return response
+
+    async def _read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, ResponseError, None]:
-        if not self._buffer or not self.encoder:
+        if not self._stream or not self.encoder:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-        raw = await self._buffer.readline()
-        if not raw:
-            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+        raw = await self._readline()
         response: Any
         byte, response = raw[:1], raw[1:]
 
@@ -398,6 +289,7 @@ class PythonParser(BaseParser):
             # if the error is a ConnectionError, raise immediately so the user
             # is notified
             if isinstance(error, ConnectionError):
+                self._clear()  # Successful parse
                 raise error
             # otherwise, we're dealing with a ResponseError that might belong
             # inside a pipeline response. the connection's read_response()
@@ -415,33 +307,69 @@ class PythonParser(BaseParser):
             length = int(response)
             if length == -1:
                 return None
-            response = await self._buffer.read(length)
+            response = await self._read(length)
         # multi-bulk response
         elif byte == b"*":
             length = int(response)
             if length == -1:
                 return None
             response = [
-                (await self.read_response(disable_decoding)) for _ in range(length)
+                (await self._read_response(disable_decoding)) for _ in range(length)
             ]
         if isinstance(response, bytes) and disable_decoding is False:
             response = self.encoder.decode(response)
         return response
 
+    async def _read(self, length: int) -> bytes:
+        """
+        Read `length` bytes of data.  These are assumed to be followed
+        by a '\r\n' terminator which is subsequently discarded.
+        """
+        want = length + 2
+        end = self._pos + want
+        if len(self._buffer) >= end:
+            result = self._buffer[self._pos : end - 2]
+        else:
+            tail = self._buffer[self._pos :]
+            try:
+                data = await self._stream.readexactly(want - len(tail))
+            except asyncio.IncompleteReadError as error:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from error
+            result = (tail + data)[:-2]
+            self._chunks.append(data)
+        self._pos += want
+        return result
+
+    async def _readline(self) -> bytes:
+        """
+        read an unknown number of bytes up to the next '\r\n'
+        line separator, which is discarded.
+        """
+        found = self._buffer.find(b"\r\n", self._pos)
+        if found >= 0:
+            result = self._buffer[self._pos : found]
+        else:
+            tail = self._buffer[self._pos :]
+            data = await self._stream.readline()
+            if not data.endswith(b"\r\n"):
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            result = (tail + data)[:-2]
+            self._chunks.append(data)
+        self._pos += len(result) + 2
+        return result
+
 
 class HiredisParser(BaseParser):
     """Parser class for connections using Hiredis"""
 
-    __slots__ = BaseParser.__slots__ + ("_next_response", "_reader", "_socket_timeout")
-
-    _next_response: bool
+    __slots__ = BaseParser.__slots__ + ("_reader", "_connected")
 
     def __init__(self, socket_read_size: int):
         if not HIREDIS_AVAILABLE:
             raise KeyDBError("Hiredis is not available.")
         super().__init__(socket_read_size=socket_read_size)
         self._reader: Optional[hiredis.Reader] = None
-        self._socket_timeout: Optional[float] = None
+        self._connected: bool = False
 
     def on_connect(self, connection: "AsyncConnection"):
         self._stream = connection._reader
@@ -454,70 +382,39 @@ class HiredisParser(BaseParser):
             kwargs["errors"] = connection.encoder.encoding_errors
 
         self._reader = hiredis.Reader(**kwargs)
-        self._next_response = False
-        self._socket_timeout = connection.socket_timeout
+        self._connected = True
 
     def on_disconnect(self):
-        self._stream = None
-        self._reader = None
-        self._next_response = False
+        self._connected = False
 
-    async def can_read(self, timeout: float):
-        if not self._stream or not self._reader:
+    async def can_read_destructive(self):
+        if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-
-        if self._next_response is False:
-            self._next_response = self._reader.gets()
-        if self._next_response is False:
-            return await self.read_from_socket(timeout=timeout, raise_on_timeout=False)
-        return True
-
-    async def read_from_socket(
-        self,
-        timeout: Union[float, None, _Sentinel] = SENTINEL,
-        raise_on_timeout: bool = True,
-    ):
-        timeout = self._socket_timeout if timeout is SENTINEL else timeout
-        try:
-            if timeout is None:
-                buffer = await self._stream.read(self._read_size)
-            else:
-                async with async_timeout.timeout(timeout):
-                    buffer = await self._stream.read(self._read_size)
-            if not buffer or not isinstance(buffer, bytes):
-                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
-            self._reader.feed(buffer)
-            # data was read from the socket and added to the buffer.
-            # return True to indicate that data was read.
+        if self._reader.gets():
             return True
-        except asyncio.CancelledError:
-            raise
-        except (socket.timeout, asyncio.TimeoutError):
-            if raise_on_timeout:
-                raise TimeoutError("Timeout reading from socket") from None
+        try:
+            async with async_timeout.timeout(0):
+                return await self.read_from_socket()
+        except asyncio.TimeoutError:
             return False
-        except NONBLOCKING_EXCEPTIONS as ex:
-            # if we're in nonblocking mode and the recv raises a
-            # blocking error, simply return False indicating that
-            # there's no data to be read. otherwise raise the
-            # original exception.
-            allowed = NONBLOCKING_EXCEPTION_ERROR_NUMBERS.get(ex.__class__, -1)
-            if not raise_on_timeout and ex.errno == allowed:
-                return False
-            raise ConnectionError(f"Error while reading from socket: {ex.args}")
+
+    async def read_from_socket(self):
+        buffer = await self._stream.read(self._read_size)
+        if not buffer or not isinstance(buffer, bytes):
+            raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
+        self._reader.feed(buffer)
+        # data was read from the socket and added to the buffer.
+        # return True to indicate that data was read.
+        return True
 
     async def read_response(
         self, disable_decoding: bool = False
     ) -> Union[EncodableT, List[EncodableT]]:
-        if not self._stream or not self._reader:
-            self.on_disconnect()
+        # If `on_disconnect()` has been called, prohibit any more reads
+        # even if they could happen because data might be present.
+        # We still allow reads in progress to finish
+        if not self._connected:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR) from None
-
-        # _next_response might be cached from a can_read() call
-        if self._next_response is not False:
-            response = self._next_response
-            self._next_response = False
-            return response
 
         response = self._reader.gets()
         while response is False:
@@ -569,6 +466,7 @@ class AsyncConnection:
         "username",
         "client_name",
         "password",
+        "credential_provider",
         "socket_timeout",
         "socket_connect_timeout",
         "socket_keepalive",
@@ -617,13 +515,23 @@ class AsyncConnection:
         retry: Optional[Retry] = None,
         keydb_connect_func: Optional[ConnectCallbackT] = None,
         encoder_class: Type[Encoder] = Encoder,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
+        
         self.pid = os.getpid()
         self.host = host
         self.port = int(port)
         self.db = db
-        self.username = username
         self.client_name = client_name
+        self.credential_provider = credential_provider
+        self.username = username
         self.password = password
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
@@ -790,14 +698,13 @@ class AsyncConnection:
         """Initialize the connection, authenticate and select a database"""
         self._parser.on_connect(self)
 
-        # if username and/or password are set, authenticate
-        if self.username or self.password:
-            auth_args: Union[Tuple[str], Tuple[str, str]]
-            if self.username:
-                auth_args = (self.username, self.password or "")
-            else:
-                # Mypy bug: https://github.com/python/mypy/issues/10944
-                auth_args = (self.password or "",)
+        # if credential provider or username and/or password are set, authenticate
+        if self.credential_provider or (self.username or self.password):
+            cred_provider = (
+                self.credential_provider
+                or UsernamePasswordCredentialProvider(self.username, self.password)
+            )
+            auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             await self.send_command("AUTH", *auth_args, check_health=False)
@@ -809,7 +716,7 @@ class AsyncConnection:
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                await self.send_command("AUTH", self.password, check_health=False)
+                await self.send_command("AUTH", auth_args[-1], check_health=False)
                 auth_response = await self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
@@ -827,7 +734,7 @@ class AsyncConnection:
             if str_if_bytes(await self.read_response()) != "OK":
                 raise ConnectionError("Invalid Database")
 
-    async def disconnect(self) -> None:
+    async def disconnect(self, nowait: bool = False) -> None:
         """Disconnects from the Redis server"""
         try:
             async with async_timeout.timeout(self.socket_connect_timeout):
@@ -837,8 +744,9 @@ class AsyncConnection:
                 try:
                     if os.getpid() == self.pid:
                         self._writer.close()  # type: ignore[union-attr]
-                        # py3.6 doesn't have this method
-                        if hasattr(self._writer, "wait_closed"):
+                        # wait for close to finish, except when handling errors and
+                        # forcefully disconnecting.
+                        if not nowait:
                             await self._writer.wait_closed()  # type: ignore[union-attr]
                 except OSError:
                     pass
@@ -849,6 +757,7 @@ class AsyncConnection:
             raise TimeoutError(
                 f"Timed out closing connection after {self.socket_connect_timeout}"
             ) from None
+
 
     async def _send_ping(self):
         """Send PING, expect PONG in return"""
@@ -915,6 +824,16 @@ class AsyncConnection:
             self.pack_command(*args), check_health=kwargs.get("check_health", True)
         )
 
+    async def can_read_destructive(self):
+        """Poll the socket to see if there's data that can be read."""
+        try:
+            return await self._parser.can_read_destructive()
+        except OSError as e:
+            await self.disconnect(nowait=True)
+            raise ConnectionError(
+                f"Error while reading from {self.host}:{self.port}: {e.args}"
+            )
+
     async def can_read(self, timeout: float = 0):
         """Poll the socket to see if there's data that can be read."""
         if not self.is_connected:
@@ -927,29 +846,41 @@ class AsyncConnection:
                 f"Error while reading from {self.host}:{self.port}: {e.args}"
             )
 
-    async def read_response(self, disable_decoding: bool = False):
+    async def read_response(
+        self,
+        disable_decoding: bool = False,
+        timeout: Optional[float] = None,
+    ):
         """Read the response from a previously sent command"""
+        read_timeout = timeout if timeout is not None else self.socket_timeout
         try:
-            async with self._lock:
-                if self.socket_timeout:
-                    async with async_timeout.timeout(self.socket_timeout):
-                        response = await self._parser.read_response(
-                            disable_decoding=disable_decoding
-                        )
-                else:
+            if read_timeout is not None:
+                async with async_timeout.timeout(read_timeout):
                     response = await self._parser.read_response(
                         disable_decoding=disable_decoding
                     )
+            else:
+                response = await self._parser.read_response(
+                    disable_decoding=disable_decoding
+                )
         except asyncio.TimeoutError:
-            await self.disconnect()
+            if timeout is not None:
+                # user requested timeout, return None
+                return None
+            # it was a self.socket_timeout error.
+            await self.disconnect(nowait=True)
             raise TimeoutError(f"Timeout reading from {self.host}:{self.port}")
         except OSError as e:
-            await self.disconnect()
+            await self.disconnect(nowait=True)
             raise ConnectionError(
                 f"Error while reading from {self.host}:{self.port} : {e.args}"
             )
-        except BaseException:
-            await self.disconnect()
+        except asyncio.CancelledError:
+            # need this check for 3.7, where CancelledError
+            # is subclass of Exception, not BaseException
+            raise
+        except Exception:
+            await self.disconnect(nowait=True)
             raise
 
         if self.health_check_interval:
@@ -959,6 +890,7 @@ class AsyncConnection:
         if isinstance(response, ResponseError):
             raise response from None
         return response
+    
 
     async def read_response_without_lock(self, disable_decoding: bool = False):
         """Read the response from a previously sent command"""
@@ -1053,7 +985,8 @@ class AsyncConnection:
                     or chunklen > buffer_cutoff
                     or isinstance(chunk, memoryview)
                 ):
-                    output.append(SYM_EMPTY.join(pieces))
+                    if pieces:
+                        output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
                     pieces = []
 
@@ -1188,18 +1121,27 @@ class AsyncUnixDomainSocketConnection(AsyncConnection):  # lgtm [py/missing-call
         client_name: str = None,
         retry: Optional[Retry] = None,
         keydb_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
         To specify a retry policy, first set `retry_on_timeout` to `True`
         then set `retry` to a valid `Retry` object
         """
+        if (username or password) and credential_provider is not None:
+            raise DataError(
+                "'username' and 'password' cannot be passed along with 'credential_"
+                "provider'. Please provide only one of the following arguments: \n"
+                "1. 'password' and (optional) 'username'\n"
+                "2. 'credential_provider'"
+            )
         self.pid = os.getpid()
         self.path = path
         self.db = db
         self.username = username
-        self.client_name = client_name
         self.password = password
+        self.credential_provider = credential_provider
+        self.client_name = client_name
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout or None
         self.retry_on_timeout = retry_on_timeout
@@ -1524,12 +1466,12 @@ class AsyncConnectionPool:
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if await connection.can_read():
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 await connection.disconnect()
                 await connection.connect()
-                if await connection.can_read():
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection not ready") from None
         except BaseException:
             # release the connection back to the pool so that we don't
@@ -1603,6 +1545,13 @@ class AsyncConnectionPool:
             if exc:
                 raise exc
 
+
+    def set_retry(self, retry: "Retry") -> None:
+        for conn in self._available_connections:
+            conn.retry = retry
+        for conn in self._in_use_connections:
+            conn.retry = retry
+        
 
 class AsyncBlockingConnectionPool(AsyncConnectionPool):
     """
@@ -1707,10 +1656,11 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
         try:
             async with async_timeout.timeout(self.timeout):
                 connection = await self.pool.get()
-        except (asyncio.QueueEmpty, asyncio.TimeoutError):
+        except (asyncio.QueueEmpty, asyncio.TimeoutError) as e:
             # Note that this is not caught by the redis client and will be
             # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
+            raise ConnectionError("No connection available")
+            # raise ConnectionError(f"No connection available {e}: {self.connection_kwargs}, timeout: {self.timeout}, max_conn: {self.max_connections}, pool: {self.pool}")
 
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
@@ -1725,13 +1675,14 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
             try:
-                if await connection.can_read():
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
-            except ConnectionError:
+            except (ConnectionError, OSError):
                 await connection.disconnect()
                 await connection.connect()
-                if await connection.can_read():
+                if await connection.can_read_destructive():
                     raise ConnectionError("Connection not ready") from None
+        
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             await self.release(connection)

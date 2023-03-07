@@ -11,6 +11,7 @@ from aiokeydb.connection import (
     SSLConnection,
     UnixDomainSocketConnection,
 )
+from aiokeydb.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from aiokeydb.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -108,6 +109,8 @@ __all__ = [
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",
+    "CredentialProvider",
+    "UsernamePasswordCredentialProvider",
     # Async
     "AsyncKeyDB", 
     "StrictAsyncKeyDB",

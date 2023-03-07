@@ -2,12 +2,13 @@ import typing
 import logging
 
 from aiokeydb.lock import Lock
-from aiokeydb.connection import Encoder
+from aiokeydb.connection import Encoder, ConnectionPool
 from aiokeydb.core import KeyDB, PubSub, Pipeline
 
 from aiokeydb.typing import Number, KeyT, AbsExpiryT, ExpiryT
 from aiokeydb.asyncio.lock import AsyncLock
 from aiokeydb.asyncio.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
+from aiokeydb.asyncio.connection import AsyncConnectionPool
 
 from aiokeydb.client.config import KeyDBSettings
 from aiokeydb.client.types import classproperty, KeyDBUri
@@ -46,6 +47,7 @@ class KeyDBClient:
         socket_connect_timeout: typing.Optional[float] = -1.0,
         connection_timeout: typing.Optional[int] = -1,
         socket_keepalive: typing.Optional[bool] = None,
+        retry_on_timeout: typing.Optional[bool] = None,
         encoding: typing.Optional[str] = None,
         encoding_errors: typing.Optional[str] = None,
         config_kwargs: typing.Optional[typing.Union[str, typing.Dict[str, typing.Any]]] = None,
@@ -78,6 +80,7 @@ class KeyDBClient:
             socket_timeout=socket_timeout,
             socket_connect_timeout=socket_connect_timeout,
             socket_keepalive=socket_keepalive,
+            retry_on_timeout=retry_on_timeout,
             connection_timeout=connection_timeout,
             encoding=encoding,
             encoding_errors=encoding_errors,
@@ -193,6 +196,8 @@ class KeyDBClient:
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
         _decode_responses: typing.Optional[bool] = None,
+        connection_pool_cls: typing.Optional[typing.Type[ConnectionPool]] = None,
+        async_connection_pool_cls: typing.Optional[typing.Type[AsyncConnectionPool]] = None,
         **kwargs,
     ):
         """
@@ -222,6 +227,8 @@ class KeyDBClient:
             settings = cls.settings,
             cache_enabled = cache_enabled,
             _decode_responses = _decode_responses,
+            connection_pool_cls = connection_pool_cls,
+            async_connection_pool_cls = async_connection_pool_cls,
             **config,
         )
         cls.sessions[name] = ctx

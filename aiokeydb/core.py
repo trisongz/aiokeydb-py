@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import warnings
+import typing
 from itertools import chain
 from aiokeydb.parsers import (
     str_if_bytes,
@@ -75,6 +76,8 @@ from aiokeydb.exceptions import (
 )
 from aiokeydb.lock import Lock
 from aiokeydb.utils import safe_str
+from aiokeydb.credentials import CredentialProvider
+from aiokeydb.retry import Retry
 
 SYM_EMPTY = b""
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
@@ -258,7 +261,12 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
     """
 
     @classmethod
-    def from_url(cls, url, **kwargs):
+    def from_url(
+        cls, 
+        url, 
+        connection_pool_cls: typing.Optional[typing.Type[ConnectionPool]] = None,
+        **kwargs
+    ):
         """
         Return a KeyDB client object configured from the given URL
 
@@ -301,7 +309,8 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
         arguments always win.
 
         """
-        connection_pool = ConnectionPool.from_url(url, **kwargs)
+        if connection_pool_cls is None: connection_pool_cls = ConnectionPool
+        connection_pool = connection_pool_cls.from_url(url, **kwargs)
         return cls(connection_pool=connection_pool)
 
     def __init__(
@@ -342,7 +351,8 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
         client_name=None,
         username=None,
         retry=None,
-        keydb_connect_func=None,
+        keydb_connect_func = None,
+        credential_provider: typing.Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new KeyDB client.
@@ -384,6 +394,7 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
                 "health_check_interval": health_check_interval,
                 "client_name": client_name,
                 "keydb_connect_func": keydb_connect_func,
+                "credential_provider": credential_provider,
             }
             # based on input, setup appropriate connection args
             if unix_socket_path is not None:
@@ -440,6 +451,14 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+    
+
+    def get_retry(self) -> typing.Optional["Retry"]:
+        return self.get_connection_kwargs().get("retry")
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
 
     def set_response_callback(self, command, callback):
         """Set a custom Response Callback"""

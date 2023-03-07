@@ -165,6 +165,9 @@ class KeyDBSettings(BaseSettings):
     socket_connect_timeout: Optional[float] = 60.0
     connection_timeout: Optional[int] = 300
     socket_keepalive: Optional[bool] = True
+    retry_on_timeout: Optional[bool] = True
+    health_check_interval: Optional[int] = 15
+
     encoding: Optional[str] = 'utf-8'
     encoding_errors: Optional[str] = 'strict'
     config_kwargs: Optional[Union[str, Dict[str, Any]]] = {}
@@ -414,6 +417,8 @@ class KeyDBSettings(BaseSettings):
             'socket_timeout': self.socket_timeout,
             'socket_connect_timeout': self.socket_connect_timeout,
             'socket_keepalive': self.socket_keepalive,
+            'retry_on_timeout': self.retry_on_timeout,
+            'health_check_interval': self.health_check_interval,
             # 'connection_timeout': self.connection_timeout,
             **self.config_kwargs
         }
@@ -449,6 +454,9 @@ class KeyDBSettings(BaseSettings):
         socket_connect_timeout: Optional[float] = -1.0,
         connection_timeout: Optional[int] = -1,
         socket_keepalive: Optional[bool] = None,
+        health_check_interval: Optional[int] = -1,
+
+        retry_on_timeout: Optional[bool] = None,
         encoding: Optional[str] = None,
         encoding_errors: Optional[str] = None,
         config_kwargs: Optional[Union[str, Dict[str, Any]]] = None,
@@ -487,7 +495,9 @@ class KeyDBSettings(BaseSettings):
         if socket_timeout is None or socket_timeout >= 0.0: self.socket_timeout = socket_timeout
         if socket_connect_timeout is None or socket_connect_timeout >= 0.0: self.socket_connect_timeout = socket_connect_timeout
         if connection_timeout is None or connection_timeout >= 0: self.connection_timeout = connection_timeout
-        
+        if health_check_interval is None or health_check_interval >= 0.0: self.health_check_interval = health_check_interval
+        if self.retry_on_timeout is not None: self.retry_on_timeout = retry_on_timeout
+
         if socket_keepalive is not None: self.socket_keepalive = socket_keepalive
         if encoding is not None: self.encoding = encoding
         if encoding_errors is not None: self.encoding_errors = encoding_errors

@@ -1,9 +1,11 @@
+import sys
 import copy
 import errno
 import io
 import os
 import socket
 import threading
+import typing
 import weakref
 from itertools import chain
 from queue import Empty, Full, LifoQueue
@@ -13,6 +15,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from packaging.version import Version
 
 from aiokeydb.backoff import NoBackoff
+from aiokeydb.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from aiokeydb.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -31,7 +34,7 @@ from aiokeydb.exceptions import (
     TimeoutError,
 )
 from aiokeydb.retry import Retry
-from aiokeydb.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, str_if_bytes
+from aiokeydb.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes
 
 try:
     import ssl
@@ -81,6 +84,15 @@ MODULE_EXPORTS_DATA_TYPES_ERROR = (
     "types, can't unload"
 )
 
+# user send an AUTH cmd to a server without authorization configured
+NO_AUTH_SET_ERROR = {
+    # Redis >= 6.0
+    "AUTH <password> called without any password "
+    "configured for the default user. Are you sure "
+    "your configuration is correct?": AuthenticationError,
+    # Redis < 6.0
+    "Client sent AUTH, but no password is set": AuthenticationError,
+}
 
 class Encoder:
     "Encode strings to bytes-like and decode bytes-like to strings"
@@ -162,32 +174,42 @@ class BaseParser:
         return ResponseError(response)
 
 
+
 class SocketBuffer:
-    def __init__(self, socket, socket_read_size, socket_timeout):
+    def __init__(
+        self, socket: socket.socket, socket_read_size: int, socket_timeout: float
+    ):
         self._sock = socket
         self.socket_read_size = socket_read_size
         self.socket_timeout = socket_timeout
         self._buffer = io.BytesIO()
-        # number of bytes written to the buffer from the socket
-        self.bytes_written = 0
-        # number of bytes read from the buffer
-        self.bytes_read = 0
 
-    @property
-    def length(self):
-        return self.bytes_written - self.bytes_read
+    def unread_bytes(self) -> int:
+        """
+        Remaining unread length of buffer
+        """
+        pos = self._buffer.tell()
+        end = self._buffer.seek(0, io.SEEK_END)
+        self._buffer.seek(pos)
+        return end - pos
 
-    def _read_from_socket(self, length=None, timeout=SENTINEL, raise_on_timeout=True):
+    def _read_from_socket(
+        self,
+        length: typing.Optional[int] = None,
+        timeout: typing.Union[float, object] = SENTINEL,
+        raise_on_timeout: typing.Optional[bool] = True,
+    ) -> bool:
         sock = self._sock
         socket_read_size = self.socket_read_size
-        buf = self._buffer
-        buf.seek(self.bytes_written)
         marker = 0
         custom_timeout = timeout is not SENTINEL
 
+        buf = self._buffer
+        current_pos = buf.tell()
+        buf.seek(0, io.SEEK_END)
+        if custom_timeout:
+            sock.settimeout(timeout)
         try:
-            if custom_timeout:
-                sock.settimeout(timeout)
             while True:
                 data = self._sock.recv(socket_read_size)
                 # an empty string indicates the server shutdown the socket
@@ -195,7 +217,6 @@ class SocketBuffer:
                     raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
                 buf.write(data)
                 data_length = len(data)
-                self.bytes_written += data_length
                 marker += data_length
 
                 if length is not None and length > marker:
@@ -215,59 +236,69 @@ class SocketBuffer:
                 return False
             raise ConnectionError(f"Error while reading from socket: {ex.args}")
         finally:
+            buf.seek(current_pos)
             if custom_timeout:
                 sock.settimeout(self.socket_timeout)
 
-    def can_read(self, timeout):
-        return bool(self.length) or self._read_from_socket(
+    def can_read(self, timeout: float) -> bool:
+        return bool(self.unread_bytes()) or self._read_from_socket(
             timeout=timeout, raise_on_timeout=False
         )
 
-    def read(self, length):
+    def read(self, length: int) -> bytes:
         length = length + 2  # make sure to read the \r\n terminator
-        # make sure we've read enough data from the socket
-        if length > self.length:
-            self._read_from_socket(length - self.length)
-
-        self._buffer.seek(self.bytes_read)
+        # BufferIO will return less than requested if buffer is short
         data = self._buffer.read(length)
-        self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
-
+        missing = length - len(data)
+        if missing:
+            # fill up the buffer and read the remainder
+            self._read_from_socket(missing)
+            data += self._buffer.read(missing)
         return data[:-2]
 
-    def readline(self):
+    def readline(self) -> bytes:
         buf = self._buffer
-        buf.seek(self.bytes_read)
         data = buf.readline()
         while not data.endswith(SYM_CRLF):
             # there's more data in the socket that we need
             self._read_from_socket()
-            buf.seek(self.bytes_read)
-            data = buf.readline()
-
-        self.bytes_read += len(data)
-
-        # purge the buffer when we've consumed it all so it doesn't
-        # grow forever
-        if self.bytes_read == self.bytes_written:
-            self.purge()
+            data += buf.readline()
 
         return data[:-2]
 
-    def purge(self):
-        self._buffer.seek(0)
-        self._buffer.truncate()
-        self.bytes_written = 0
-        self.bytes_read = 0
+    def get_pos(self) -> int:
+        """
+        Get current read position
+        """
+        return self._buffer.tell()
 
-    def close(self):
+    def rewind(self, pos: int) -> None:
+        """
+        Rewind the buffer to a specific position, to re-start reading
+        """
+        self._buffer.seek(pos)
+
+    def purge(self) -> None:
+        """
+        After a successful read, purge the read part of buffer
+        """
+        unread = self.unread_bytes()
+
+        # Only if we have read all of the buffer do we truncate, to
+        # reduce the amount of memory thrashing.  This heuristic
+        # can be changed or removed later.
+        if unread > 0:
+            return
+
+        if unread > 0:
+            # move unread data to the front
+            view = self._buffer.getbuffer()
+            view[:unread] = view[-unread:]
+        self._buffer.truncate(unread)
+        self._buffer.seek(0)
+
+    def close(self) -> None:
         try:
-            self.purge()
             self._buffer.close()
         except Exception:
             # issue #633 suggests the purge/close somehow raised a
@@ -278,6 +309,7 @@ class SocketBuffer:
             pass
         self._buffer = None
         self._sock = None
+
 
 
 class PythonParser(BaseParser):
@@ -315,6 +347,18 @@ class PythonParser(BaseParser):
         return self._buffer and self._buffer.can_read(timeout)
 
     def read_response(self, disable_decoding=False):
+        pos = self._buffer.get_pos() if self._buffer else None
+        try:
+            result = self._read_response(disable_decoding=disable_decoding)
+        except BaseException:
+            if self._buffer:
+                self._buffer.rewind(pos)
+            raise
+        else:
+            self._buffer.purge()
+            return result
+
+    def _read_response(self, disable_decoding=False):
         raw = self._buffer.readline()
         if not raw:
             raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
@@ -355,7 +399,7 @@ class PythonParser(BaseParser):
             if length == -1:
                 return None
             response = [
-                self.read_response(disable_decoding=disable_decoding)
+                self._read_response(disable_decoding=disable_decoding)
                 for i in range(length)
             ]
         if isinstance(response, bytes) and disable_decoding is False:
@@ -370,9 +414,7 @@ class HiredisParser(BaseParser):
         if not HIREDIS_AVAILABLE:
             raise KeyDBError("Hiredis is not installed")
         self.socket_read_size = socket_read_size
-
-        if HIREDIS_USE_BYTE_BUFFER:
-            self._buffer = bytearray(socket_read_size)
+        self._buffer = bytearray(socket_read_size)
 
     def __del__(self):
         try:
@@ -383,16 +425,14 @@ class HiredisParser(BaseParser):
     def on_connect(self, connection, **kwargs):
         self._sock = connection._sock
         self._socket_timeout = connection.socket_timeout
-        kwargs = {"protocolError": InvalidResponse, "replyError": self.parse_error}
-
-        # hiredis < 0.1.3 doesn't support functions that create exceptions
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            kwargs["replyError"] = ResponseError
+        kwargs = {
+            "protocolError": InvalidResponse,
+            "replyError": self.parse_error,
+            "errors": connection.encoder.encoding_errors,
+        }
 
         if connection.encoder.decode_responses:
             kwargs["encoding"] = connection.encoder.encoding
-        if HIREDIS_SUPPORTS_ENCODING_ERRORS:
-            kwargs["errors"] = connection.encoder.encoding_errors
         self._reader = hiredis.Reader(**kwargs)
         self._next_response = False
 
@@ -417,17 +457,10 @@ class HiredisParser(BaseParser):
         try:
             if custom_timeout:
                 sock.settimeout(timeout)
-            if HIREDIS_USE_BYTE_BUFFER:
-                bufflen = self._sock.recv_into(self._buffer)
-                if bufflen == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(self._buffer, 0, bufflen)
-            else:
-                buffer = self._sock.recv(self.socket_read_size)
-                # an empty string indicates the server shutdown the socket
-                if not isinstance(buffer, bytes) or len(buffer) == 0:
-                    raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
-                self._reader.feed(buffer)
+            bufflen = self._sock.recv_into(self._buffer)
+            if bufflen == 0:
+                raise ConnectionError(SERVER_CLOSED_CONNECTION_ERROR)
+            self._reader.feed(self._buffer, 0, bufflen)
             # data was read from the socket and added to the buffer.
             # return True to indicate that data was read.
             return True
@@ -469,17 +502,6 @@ class HiredisParser(BaseParser):
                 response = self._reader.gets(False)
             else:
                 response = self._reader.gets()
-        # if an older version of hiredis is installed, we need to attempt
-        # to convert ResponseErrors to their appropriate types.
-        if not HIREDIS_SUPPORTS_CALLABLE_ERRORS:
-            if isinstance(response, ResponseError):
-                response = self.parse_error(response.args[0])
-            elif (
-                isinstance(response, list)
-                and response
-                and isinstance(response[0], ResponseError)
-            ):
-                response[0] = self.parse_error(response[0].args[0])
         # if the response is a ConnectionError or the response is a list and
         # the first item is a ConnectionError, raise it as something bad
         # happened
@@ -498,6 +520,76 @@ if HIREDIS_AVAILABLE:
     DefaultParser = HiredisParser
 else:
     DefaultParser = PythonParser
+
+
+class HiredisRespSerializer:
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+        try:
+            output.append(hiredis.pack_command(args))
+        except TypeError:
+            _, value, traceback = sys.exc_info()
+            raise DataError(value).with_traceback(traceback)
+
+        return output
+
+
+class PythonRespSerializer:
+    def __init__(self, buffer_cutoff, encode) -> None:
+        self._buffer_cutoff = buffer_cutoff
+        self.encode = encode
+
+    def pack(self, *args):
+        """Pack a series of arguments into the Redis protocol"""
+        output = []
+        # the client might have included 1 or more literal arguments in
+        # the command name, e.g., 'CONFIG GET'. The Redis server expects these
+        # arguments to be sent separately, so split the first argument
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b" " in args[0]:
+            args = tuple(args[0].split()) + args[1:]
+
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
+
+        buffer_cutoff = self._buffer_cutoff
+        for arg in map(self.encode, args):
+            # to avoid large string mallocs, chunk the command into the
+            # output list if we're sending large values or memoryviews
+            arg_length = len(arg)
+            if (
+                len(buff) > buffer_cutoff
+                or arg_length > buffer_cutoff
+                or isinstance(arg, memoryview)
+            ):
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
+                )
+                output.append(buff)
+                output.append(arg)
+                buff = SYM_CRLF
+            else:
+                buff = SYM_EMPTY.join(
+                    (
+                        buff,
+                        SYM_DOLLAR,
+                        str(arg_length).encode(),
+                        SYM_CRLF,
+                        arg,
+                        SYM_CRLF,
+                    )
+                )
+        output.append(buff)
+        return output
+
 
 
 class Connection:
@@ -526,6 +618,9 @@ class Connection:
         username=None,
         retry=None,
         keydb_connect_func=None,
+        credential_provider: typing.Optional[CredentialProvider] = None,
+        command_packer=None,
+
     ):
         """
         Initialize a new Connection.
@@ -541,6 +636,7 @@ class Connection:
         self.username = username
         self.client_name = client_name
         self.password = password
+        self.credential_provider = credential_provider
         self.socket_timeout = socket_timeout
         self.socket_connect_timeout = socket_connect_timeout or socket_timeout
         self.socket_keepalive = socket_keepalive
@@ -572,6 +668,7 @@ class Connection:
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def __repr__(self):
         repr_args = ",".join([f"{k}={v}" for k, v in self.repr_pieces()])
@@ -589,6 +686,16 @@ class Connection:
         except Exception:
             pass
 
+    
+    def _construct_command_packer(self, packer):
+        if packer is not None:
+            return packer
+        elif HIREDIS_PACK_AVAILABLE:
+            return HiredisRespSerializer()
+        else:
+            return PythonRespSerializer(self._buffer_cutoff, self.encoder.encode)
+
+
     def register_connect_callback(self, callback):
         self._connect_callbacks.append(weakref.WeakMethod(callback))
 
@@ -601,10 +708,11 @@ class Connection:
         _socket_read_size and assigns it to the parser for the connection
         :param parser_class: The required parser class
         """
-        self._parser = parser_class(socket_read_size=self._socket_read_size)
+        self._parser: typing.Type[BaseParser] = parser_class(socket_read_size=self._socket_read_size)
 
+    
     def connect(self):
-        "Connects to the KeyDB server if not already connected"
+        "Connects to the Redis server if not already connected"
         if self._sock:
             return
         try:
@@ -622,7 +730,7 @@ class Connection:
                 # Use the default on_connect function
                 self.on_connect()
             else:
-                # Use the passed function keydb_connect_func
+                # Use the passed function redis_connect_func
                 self.keydb_connect_func(self)
         except KeyDBError:
             # clean up after any error in on_connect
@@ -677,12 +785,25 @@ class Connection:
             raise err
         raise OSError("socket.getaddrinfo returned an empty list")
 
+
+    def _host_error(self):
+        try:
+            host_error = f"{self.host}:{self.port}"
+        except AttributeError:
+            host_error = "connection"
+
+        return host_error
+
+
     def _error_message(self, exception):
         # args for socket.error can either be (errno, "message")
         # or just "message"
+
+        host_error = self._host_error()
+
         if len(exception.args) == 1:
             try:
-                return f"Error connecting to {self.host}:{self.port}. \
+                return f"Error connecting to {host_error}. \
                         {exception.args[0]}."
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
@@ -690,21 +811,23 @@ class Connection:
             try:
                 return (
                     f"Error {exception.args[0]} connecting to "
-                    f"{self.host}:{self.port}. {exception.args[1]}."
+                    f"{host_error}. {exception.args[1]}."
                 )
             except AttributeError:
                 return f"Connection Error: {exception.args[0]}"
+
 
     def on_connect(self):
         "Initialize the connection, authenticate and select a database"
         self._parser.on_connect(self)
 
-        # if username and/or password are set, authenticate
-        if self.username or self.password:
-            if self.username:
-                auth_args = (self.username, self.password or "")
-            else:
-                auth_args = (self.password,)
+        # if credential provider or username and/or password are set, authenticate
+        if self.credential_provider or (self.username or self.password):
+            cred_provider = (
+                self.credential_provider
+                or UsernamePasswordCredentialProvider(self.username, self.password)
+            )
+            auth_args = cred_provider.get_credentials()
             # avoid checking health here -- PING will fail if we try
             # to check the health prior to the AUTH
             self.send_command("AUTH", *auth_args, check_health=False)
@@ -712,11 +835,11 @@ class Connection:
             try:
                 auth_response = self.read_response()
             except AuthenticationWrongNumberOfArgsError:
-                # a username and password were specified but the KeyDB
+                # a username and password were specified but the Redis
                 # server seems to be < 6.0.0 which expects a single password
                 # arg. retry auth with just the password.
                 # https://github.com/andymccurdy/redis-py/issues/1274
-                self.send_command("AUTH", self.password, check_health=False)
+                self.send_command("AUTH", auth_args[-1], check_health=False)
                 auth_response = self.read_response()
 
             if str_if_bytes(auth_response) != "OK":
@@ -751,7 +874,7 @@ class Connection:
         except OSError:
             pass
         self._sock = None
-
+    
     def _send_ping(self):
         """Send PING, expect PONG in return"""
         self.send_command("PING", check_health=False)
@@ -790,9 +913,10 @@ class Connection:
                 errno = e.args[0]
                 errmsg = e.args[1]
             raise ConnectionError(f"Error {errno} while writing to socket. {errmsg}.")
-        except BaseException:
+        except Exception:
             self.disconnect()
             raise
+
 
     def send_command(self, *args, **kwargs):
         """Pack and send a command to the KeyDB server"""
@@ -803,32 +927,29 @@ class Connection:
     def can_read(self, timeout=0):
         """Poll the socket to see if there's data that can be read."""
         sock = self._sock
-        if not sock:
-            self.connect()
+        if not sock: self.connect()
+        host_error = self._host_error()
         try:
             return self._parser.can_read(timeout)
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(
-                f"Error while reading from {self.host}:{self.port}: {e.args}"
-            )
+            raise ConnectionError(f"Error while reading from {host_error}: {e.args}")
 
     def read_response(self, disable_decoding=False):
         """Read the response from a previously sent command"""
-        try:
-            hosterr = f"{self.host}:{self.port}"
-        except AttributeError:
-            hosterr = "connection"
+        host_error = self._host_error()
 
         try:
             response = self._parser.read_response(disable_decoding=disable_decoding)
         except socket.timeout:
             self.disconnect()
-            raise TimeoutError(f"Timeout reading from {hosterr}")
+            raise TimeoutError(f"Timeout reading from {host_error}")
         except OSError as e:
             self.disconnect()
-            raise ConnectionError(f"Error while reading from {hosterr}" f" : {e.args}")
-        except BaseException:
+            raise ConnectionError(
+                f"Error while reading from {host_error}" f" : {e.args}"
+            )
+        except Exception:
             self.disconnect()
             raise
 
@@ -839,67 +960,28 @@ class Connection:
             raise response
         return response
 
+    
     def pack_command(self, *args):
-        """Pack a series of arguments into the KeyDB protocol"""
-        output = []
-        # the client might have included 1 or more literal arguments in
-        # the command name, e.g., 'CONFIG GET'. The KeyDB server expects these
-        # arguments to be sent separately, so split the first argument
-        # manually. These arguments should be bytestrings so that they are
-        # not encoded.
-        if isinstance(args[0], str):
-            args = tuple(args[0].encode().split()) + args[1:]
-        elif b" " in args[0]:
-            args = tuple(args[0].split()) + args[1:]
-
-        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
-
-        buffer_cutoff = self._buffer_cutoff
-        for arg in map(self.encoder.encode, args):
-            # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values or memoryviews
-            arg_length = len(arg)
-            if (
-                len(buff) > buffer_cutoff
-                or arg_length > buffer_cutoff
-                or isinstance(arg, memoryview)
-            ):
-                buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF)
-                )
-                output.append(buff)
-                output.append(arg)
-                buff = SYM_CRLF
-            else:
-                buff = SYM_EMPTY.join(
-                    (
-                        buff,
-                        SYM_DOLLAR,
-                        str(arg_length).encode(),
-                        SYM_CRLF,
-                        arg,
-                        SYM_CRLF,
-                    )
-                )
-        output.append(buff)
-        return output
+        """Pack a series of arguments into the Redis protocol"""
+        return self._command_packer.pack(*args)
 
     def pack_commands(self, commands):
-        """Pack multiple commands into the KeyDB protocol"""
+        """Pack multiple commands into the Redis protocol"""
         output = []
         pieces = []
         buffer_length = 0
         buffer_cutoff = self._buffer_cutoff
 
         for cmd in commands:
-            for chunk in self.pack_command(*cmd):
+            for chunk in self._command_packer.pack(*cmd):
                 chunklen = len(chunk)
                 if (
                     buffer_length > buffer_cutoff
                     or chunklen > buffer_cutoff
                     or isinstance(chunk, memoryview)
                 ):
-                    output.append(SYM_EMPTY.join(pieces))
+                    if pieces:
+                        output.append(SYM_EMPTY.join(pieces))
                     buffer_length = 0
                     pieces = []
 
@@ -912,6 +994,7 @@ class Connection:
         if pieces:
             output.append(SYM_EMPTY.join(pieces))
         return output
+
 
 
 class SSLConnection(Connection):
@@ -1073,6 +1156,8 @@ class UnixDomainSocketConnection(Connection):
         client_name=None,
         retry=None,
         keydb_connect_func=None,
+        credential_provider: typing.Optional[CredentialProvider] = None,
+        command_packer=None,
     ):
         """
         Initialize a new UnixDomainSocketConnection.
@@ -1087,6 +1172,7 @@ class UnixDomainSocketConnection(Connection):
         self.username = username
         self.client_name = client_name
         self.password = password
+        self.credential_provider = credential_provider
         self.socket_timeout = socket_timeout
         self.retry_on_timeout = retry_on_timeout
         if retry_on_error is SENTINEL:
@@ -1114,6 +1200,7 @@ class UnixDomainSocketConnection(Connection):
         self.set_parser(parser_class)
         self._connect_callbacks = []
         self._buffer_cutoff = 6000
+        self._command_packer = self._construct_command_packer(command_packer)
 
     def repr_pieces(self):
         pieces = [("path", self.path), ("db", self.db)]

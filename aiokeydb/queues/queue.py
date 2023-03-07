@@ -11,7 +11,8 @@ from lazyops.utils.serialization import ObjectEncoder
 from aiokeydb.client.serializers import SerializerType
 from aiokeydb.client.core import KeyDBClient
 from aiokeydb.client.schemas.session import KeyDBSession
-
+from aiokeydb.connection import ConnectionPool, BlockingConnectionPool
+from aiokeydb.asyncio.connection import AsyncConnectionPool, AsyncBlockingConnectionPool
 from aiokeydb.queues.errors import JobError
 from aiokeydb.queues.types import (
     Job,
@@ -98,6 +99,15 @@ class TaskQueue:
             cache_enabled = False,
             _decode_responses = False,
             set_current = False,
+            retry_on_timeout = True,
+            health_check_interval = heartbeat_ttl,
+            # socket_timeout = 5,
+            socket_connect_timeout = 15,
+            socket_keepalive = True,
+            # connection_pool_cls = BlockingConnectionPool,
+            # async_connection_pool_cls = AsyncBlockingConnectionPool,
+            # single_connection_client = True,
+            # timeout = 20,
             **kwargs,
         )
         self.uri: KeyDBUri = self.ctx.uri

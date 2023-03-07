@@ -8,11 +8,12 @@ import functools
 import contextlib
 from aiokeydb.typing import Number, KeyT, ExpiryT, AbsExpiryT
 from aiokeydb.lock import Lock
-from aiokeydb.connection import Encoder
+from aiokeydb.connection import Encoder, ConnectionPool
 from aiokeydb.core import KeyDB, PubSub, Pipeline
 
 from aiokeydb.asyncio.lock import AsyncLock
 from aiokeydb.asyncio.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
+from aiokeydb.asyncio.connection import AsyncConnectionPool
 from aiokeydb.exceptions import (
     ConnectionError,
     TimeoutError,
@@ -44,6 +45,8 @@ class KeyDBSession:
         cache_prefix: typing.Optional[str] = None,
         cache_enabled: typing.Optional[bool] = None,
         _decode_responses: typing.Optional[bool] = None,
+        connection_pool_cls: typing.Optional[typing.Type[ConnectionPool]] = None,
+        async_connection_pool_cls: typing.Optional[typing.Type[AsyncConnectionPool]] = None,
         **config,
     ):
         
@@ -76,6 +79,10 @@ class KeyDBSession:
 
         self._client: KeyDB = None
         self._async_client: AsyncKeyDB = None
+
+        self._connection_pool_cls = connection_pool_cls
+        self._async_connection_pool_cls = async_connection_pool_cls
+
         self._lock: Lock = None
         self._async_lock: AsyncLock = None
         self._pipeline: Pipeline = None
@@ -98,13 +105,23 @@ class KeyDBSession:
     @property
     def client(self) -> KeyDB:
         if self._client is None:
-            self._client = KeyDB.from_url(self.uri.connection, decode_responses = self.decode_responses, **self.config)
+            self._client = KeyDB.from_url(
+                self.uri.connection, 
+                decode_responses = self.decode_responses, 
+                connection_pool_cls = self._connection_pool_cls,
+                **self.config
+            )
         return self._client
     
     @property
     def async_client(self) -> AsyncKeyDB:
         if self._async_client is None:
-            self._async_client = AsyncKeyDB.from_url(self.uri.connection, decode_responses = self.decode_responses, **self.config)
+            self._async_client = AsyncKeyDB.from_url(
+                self.uri.connection, 
+                decode_responses = self.decode_responses, 
+                connection_pool_cls = self._async_connection_pool_cls,
+                **self.config
+            )
         return self._async_client
     
     @property

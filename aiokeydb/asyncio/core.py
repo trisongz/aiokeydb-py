@@ -46,6 +46,7 @@ from aiokeydb.commands import (
     list_or_args,
 )
 from aiokeydb.compat import Protocol, TypedDict
+from aiokeydb.credentials import CredentialProvider
 from aiokeydb.exceptions import (
     ConnectionError,
     ExecAbortError,
@@ -98,7 +99,13 @@ class AsyncKeyDB(
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
 
     @classmethod
-    def from_url(cls, url: str, **kwargs):
+    def from_url(
+        cls, 
+        url: str, 
+        single_connection_client: bool = False,
+        connection_pool_cls: Optional[Type[AsyncConnectionPool]] = None,
+        **kwargs
+    ):
         """
         Return a KeyDB client object configured from the given URL
 
@@ -140,8 +147,12 @@ class AsyncKeyDB(
         arguments always win.
 
         """
-        connection_pool = AsyncConnectionPool.from_url(url, **kwargs)
-        return cls(connection_pool=connection_pool)
+        if connection_pool_cls is None: connection_pool_cls = AsyncConnectionPool
+        connection_pool = connection_pool_cls.from_url(url, **kwargs)
+        return cls(
+            connection_pool = connection_pool,
+            single_connection_client = single_connection_client,
+        )
 
     def __init__(
         self,
@@ -176,6 +187,7 @@ class AsyncKeyDB(
         retry: Optional[Retry] = None,
         auto_close_connection_pool: bool = True,
         keydb_connect_func=None,
+        credential_provider: Optional[CredentialProvider] = None,
     ):
         """
         Initialize a new KeyDB client.
@@ -201,6 +213,7 @@ class AsyncKeyDB(
                 "db": db,
                 "username": username,
                 "password": password,
+                "credential_provider": credential_provider,
                 "socket_timeout": socket_timeout,
                 "encoding": encoding,
                 "encoding_errors": encoding_errors,
@@ -252,6 +265,11 @@ class AsyncKeyDB(
 
         self.response_callbacks = CaseInsensitiveDict(self.__class__.RESPONSE_CALLBACKS)
 
+        # If using a single connection client, we need to lock creation-of and use-of
+        # the client in order to avoid race conditions such as using asyncio.gather
+        # on a set of redis commands
+        self._single_conn_lock = asyncio.Lock()
+
     def __repr__(self):
         return f"{self.__class__.__name__}<{self.connection_pool!r}>"
 
@@ -259,8 +277,10 @@ class AsyncKeyDB(
         return self.initialize().__await__()
 
     async def initialize(self: _KeyDBT) -> _KeyDBT:
-        if self.single_connection_client and self.connection is None:
-            self.connection = await self.connection_pool.get_connection("_")
+        if self.single_connection_client:
+            async with self._single_conn_lock:
+                if self.connection is None:
+                    self.connection = await self.connection_pool.get_connection("_")
         return self
 
     def set_response_callback(self, command: str, callback: ResponseCallbackT):
@@ -274,6 +294,12 @@ class AsyncKeyDB(
     def get_connection_kwargs(self):
         """Get the connection's key-word arguments"""
         return self.connection_pool.connection_kwargs
+    
+
+    def set_retry(self, retry: "Retry") -> None:
+        self.get_connection_kwargs().update({"retry": retry})
+        self.connection_pool.set_retry(retry)
+
 
     def load_external_module(self, funcname, func):
         """
@@ -484,6 +510,8 @@ class AsyncKeyDB(
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
 
+        if self.single_connection_client:
+            await self._single_conn_lock.acquire()
         try:
             return await conn.retry.call_with_retry(
                 lambda: self._send_command_parse_response(
@@ -492,22 +520,29 @@ class AsyncKeyDB(
                 lambda error: self._disconnect_raise(conn, error),
             )
         finally:
+            if self.single_connection_client:
+                self._single_conn_lock.release()
             if not self.connection:
                 await pool.release(conn)
 
     async def parse_response(
-        self, connection: AsyncConnection, command_name: Union[str, bytes], **options
+        self, connection: 'AsyncConnection', command_name: Union[str, bytes], **options
     ):
-        """Parses a response from the KeyDB server"""
+        """Parses a response from the Redis server"""
         try:
             if NEVER_DECODE in options:
                 response = await connection.read_response(disable_decoding=True)
+                options.pop(NEVER_DECODE)
             else:
                 response = await connection.read_response()
         except ResponseError:
             if EMPTY_RESPONSE in options:
                 return options[EMPTY_RESPONSE]
             raise
+
+        if EMPTY_RESPONSE in options:
+            options.pop(EMPTY_RESPONSE)
+
         if command_name in self.response_callbacks:
             # Mypy bug: https://github.com/python/mypy/issues/10977
             command_name = cast(str, command_name)
