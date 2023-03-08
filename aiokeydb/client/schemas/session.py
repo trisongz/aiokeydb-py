@@ -3,9 +3,11 @@ import anyio
 import typing
 import logging
 import asyncio
+import threading
 
 import functools
 import contextlib
+from pydantic import BaseModel
 from aiokeydb.typing import Number, KeyT, ExpiryT, AbsExpiryT
 from aiokeydb.lock import Lock
 from aiokeydb.connection import Encoder, ConnectionPool
@@ -27,6 +29,54 @@ from inspect import iscoroutinefunction
 
 logger = logging.getLogger(__name__)
 
+
+class ClientPools(BaseModel):
+    """
+    Holds the reference for connection pools
+    """
+    name: str # the key for the connectionpools
+    pool: typing.Union[ConnectionPool, typing.Type[ConnectionPool]]
+    apool: typing.Union[AsyncConnectionPool, typing.Type[AsyncConnectionPool]]
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
+class SessionCtx(BaseModel):
+    """
+    Holds the reference for session ctx
+    """
+
+    active: bool = False
+    # We'll use this to keep track of the number of times we've tried to
+    # connect to the database. This is used to determine if we should
+    # attempt to reconnect to the database.
+    # if the max_attempts have been reached, we'll stop trying to reconnect
+    cache_max_attempts: int = 20
+    cache_failed_attempts: int = 0
+
+    client: typing.Optional[KeyDB] = None
+    async_client: typing.Optional[AsyncKeyDB] = None
+
+    lock: typing.Optional[Lock] = None
+    async_lock: typing.Optional[AsyncLock] = None
+    
+    pipeline: typing.Optional[Pipeline] = None
+    async_pipeline: typing.Optional[AsyncPipeline] = None
+
+    locks: typing.Dict[str, Lock] = {}
+    async_locks: typing.Dict[str, AsyncLock] = {}
+
+    pubsub: typing.Optional[PubSub] = None
+    async_pubsub: typing.Optional[AsyncPubSub] = None
+
+    pipeline: typing.Optional[Pipeline] = None
+    async_pipeline: typing.Optional[AsyncPipeline] = None
+
+    class Config:
+        arbitrary_types_allowed = True
+
+
 class KeyDBSession:
     """
     Class to hold both the sync and async clients
@@ -34,9 +84,9 @@ class KeyDBSession:
 
     def __init__(
         self,
-        #uri: str,
         uri: typing.Union[str, KeyDBUri],
         name: str,
+        client_pools: ClientPools,
         db_id: typing.Optional[int] = None,
         encoder: typing.Optional[Encoder] = None,
         serializer: typing.Optional[typing.Type[BaseSerializer]] = None,
@@ -44,9 +94,6 @@ class KeyDBSession:
         cache_ttl: typing.Optional[Number] = None,
         cache_prefix: typing.Optional[str] = None,
         cache_enabled: typing.Optional[bool] = None,
-        _decode_responses: typing.Optional[bool] = None,
-        connection_pool_cls: typing.Optional[typing.Type[ConnectionPool]] = None,
-        async_connection_pool_cls: typing.Optional[typing.Type[AsyncConnectionPool]] = None,
         **config,
     ):
         
@@ -61,68 +108,35 @@ class KeyDBSession:
             encoding_errors = config.get('encoding_errors', self.settings.encoding_errors),
             decode_responses = True,
         )
-        self.serializer = serializer
+
+        self.serializer = serializer # or self.settings.get_serializer()
 
         self.cache_prefix = cache_prefix or self.settings.cache_prefix
         self.cache_ttl = cache_ttl if cache_ttl is not None else self.settings.cache_ttl
         self.cache_enabled = cache_enabled if cache_enabled is not None else self.settings.cache_enabled
 
-
-        self._decode_responses = self.config.pop('decode_responses', _decode_responses)
-        self._active = False
-        # We'll use this to keep track of the number of times we've tried to
-        # connect to the database. This is used to determine if we should
-        # attempt to reconnect to the database.
-        # if the max_attempts have been reached, we'll stop trying to reconnect
-        self._cache_max_attempts = config.get('cache_max_attempts', 20)
-        self._cache_failed_attempts = 0
-
-        self._client: KeyDB = None
-        self._async_client: AsyncKeyDB = None
-
-        self._connection_pool_cls = connection_pool_cls
-        self._async_connection_pool_cls = async_connection_pool_cls
-
-        self._lock: Lock = None
-        self._async_lock: AsyncLock = None
-        self._pipeline: Pipeline = None
-        self._async_pipeline: AsyncPipeline = None
-
-        self._locks: typing.Dict[str, Lock] = {}
-        self._async_locks: typing.Dict[str, AsyncLock] = {}
-
-        self._pubsub: PubSub = None
-        self._async_pubsub: AsyncPubSub = None
-
-        self._pipeline: Pipeline = None
-        self._async_pipeline: AsyncPipeline = None
-
-
-    @property
-    def decode_responses(self):
-        return self._decode_responses if self._decode_responses is not None else (self.serializer is None)
+        self.client_pools = client_pools
+        self.state = SessionCtx(
+            cache_max_attempts = config.get('cache_max_attempts', 20)
+        )
+        
+        # logger.info(f'Encoder: {self.encoder} | Serializer: {self.serializer}')
 
     @property
     def client(self) -> KeyDB:
-        if self._client is None:
-            self._client = KeyDB.from_url(
-                self.uri.connection, 
-                decode_responses = self.decode_responses, 
-                connection_pool_cls = self._connection_pool_cls,
-                **self.config
+        if self.state.client is None:
+            self.state.client = KeyDB(
+                connection_pool = self.client_pools.pool,
             )
-        return self._client
+        return self.state.client
     
     @property
     def async_client(self) -> AsyncKeyDB:
-        if self._async_client is None:
-            self._async_client = AsyncKeyDB.from_url(
-                self.uri.connection, 
-                decode_responses = self.decode_responses, 
-                connection_pool_cls = self._async_connection_pool_cls,
-                **self.config
+        if self.state.async_client is None:
+            self.state.async_client = AsyncKeyDB(
+                connection_pool = self.client_pools.apool,
             )
-        return self._async_client
+        return self.state.async_client
     
     @property
     def pubsub(self) -> PubSub:
@@ -131,9 +145,9 @@ class KeyDBSession:
 
         Requires reinitialzing a new client because `decode_responses` should be set to `True`.
         """
-        if self._pubsub is None:
-            self._pubsub = KeyDB.from_url(self.uri.connection, decode_responses = True, **self.config).pubsub()
-        return self._pubsub
+        if self.state.pubsub is None:
+            self.state.pubsub = self.client.pubsub()
+        return self.state.pubsub
     
     @property
     def async_pubsub(self) -> AsyncPubSub:
@@ -142,46 +156,48 @@ class KeyDBSession:
 
         Requires reinitialzing a new client because `decode_responses` should be set to `True`.
         """
-        if self._async_pubsub is None:
-            self._async_pubsub = AsyncKeyDB.from_url(self.uri.connection, decode_responses = True, **self.config).pubsub()
-        return self._async_pubsub
+        if self.state.async_pubsub is None:
+            self.state.async_pubsub = self.async_client.pubsub()
+        return self.state.async_pubsub
+    
     
     @property
     def pipeline(self) -> Pipeline:
         """
         Initializes a `KeyDB` Client and returns a `Pipeline`.
         """
-        if self._pipeline is None:
-            self._pipeline = self.client.pipeline(
+        if self.state.pipeline is None:
+            self.state.pipeline = self.client.pipeline(
                 transaction = self.config.get('transaction', True),
                 shard_hint = self.config.get('shard_hint', None),
             )
-        return self._pipeline
+        return self.state.pipeline
     
     @property
     def async_pipeline(self) -> AsyncPipeline:
         """
         Initializes a `AsyncKeyDB` Client and returns a `AsyncPipeline`.
         """
-        if self._async_pipeline is None:
-            self._async_pipeline = self.async_client.pipeline(
+        if self.state.async_pipeline is None:
+            self.state.async_pipeline = self.async_client.pipeline(
                 transaction = self.config.get('transaction', True),
                 shard_hint = self.config.get('shard_hint', None),
             )
-        return self._async_pipeline
+        return self.state.async_pipeline
     
     @property
     def lock(self) -> Lock:
-        if self._lock is None:
-            self._lock = Lock(self.client)
-        return self._lock
+        if self.state.lock is None:
+            self.state.lock = Lock(self.client)
+        return self.state.lock
     
     @property
     def async_lock(self) -> AsyncLock:
-        if self._async_lock is None:
-            self._async_lock = AsyncLock(self.async_client)
-        return self._async_lock
-    
+        if self.state.async_lock is None:
+            self.state.async_lock = AsyncLock(self.async_client)
+        return self.state.async_lock
+
+
     def get_lock(
         self, 
         name: str, 
@@ -221,8 +237,8 @@ class KeyDBSession:
         storage so that a thread only sees its token, not a token set by
         another thread. 
         """
-        if name not in self._locks:
-            self._locks[name] = Lock(
+        if name not in self.state.locks:
+            self.state.locks[name] = Lock(
                 self.client, 
                 name = name, 
                 timeout = timeout, 
@@ -231,8 +247,8 @@ class KeyDBSession:
                 blocking_timeout = blocking_timeout, 
                 thread_local = thread_local
             )
-        if not self._lock:  self._lock = self._locks[name]
-        return self._locks[name]
+        if not self.state.lock:  self.state.lock = self.state.locks[name]
+        return self.state.locks[name]
     
     def get_async_lock(
         self, 
@@ -273,8 +289,8 @@ class KeyDBSession:
         storage so that a thread only sees its token, not a token set by
         another thread. 
         """
-        if name not in self._async_locks:
-            self._async_locks[name] = AsyncLock(
+        if name not in self.state.async_locks:
+            self.state.async_locks[name] = AsyncLock(
                 self.async_client, 
                 name = name, 
                 timeout = timeout, 
@@ -283,52 +299,52 @@ class KeyDBSession:
                 blocking_timeout = blocking_timeout, 
                 thread_local = thread_local
             )
-        if not self._async_lock:  self._async_lock = self._async_locks[name]
-        return self._async_locks[name]
+        if not self.state.async_lock:  self.state.async_lock = self.state.async_locks[name]
+        return self.state.async_locks[name]
 
     def close_locks(
         self, 
         names: typing.Optional[typing.Union[typing.List[str], str]] = None
     ):
-        if names is None: names = list(self._locks.keys())
+        if names is None: names = list(self.state.locks.keys())
         if isinstance(names, str): names = [names]
 
         for name in names:
-            if name in self._locks:
-                self._locks[name].release()
-                del self._locks[name]
+            if name in self.state.locks:
+                self.state.locks[name].release()
+                del self.state.locks[name]
     
     async def async_close_locks(
         self, 
         names: typing.Optional[typing.Union[typing.List[str], str]] = None
     ):
-        if names is None: names = list(self._async_locks.keys())
+        if names is None: names = list(self.state.async_locks.keys())
         if isinstance(names, str): names = [names]
         for name in names:
-            if name in self._async_locks:
-                await self._async_locks[name].release()
-                del self._async_locks[name]
+            if name in self.state.async_locks:
+                await self.state.async_locks[name].release()
+                del self.state.async_locks[name]
     
 
     def close(self):
         self.close_locks()
-        if self._pubsub is not None:
-            self._pubsub.close()
-            self._pubsub = None
+        if self.state.pubsub is not None:
+            self.state.pubsub.close()
+            self.state.pubsub = None
         
-        if self._client is not None:
-            self._client.close()
-            self._client = None
+        if self.state.client is not None:
+            self.state.client.close()
+            self.state.client = None
 
     async def aclose(self):
         await self.async_close_locks()
-        if self._async_pubsub is not None:
-            await self._async_pubsub.close()
-            self._async_pubsub = None
+        if self.state.async_pubsub is not None:
+            await self.state.async_pubsub.close()
+            self.state.async_pubsub = None
         
-        if self._async_client is not None:
-            await self._async_client.close()
-            self._async_client = None
+        if self.state.async_client is not None:
+            await self.state.async_client.close()
+            self.state.async_client = None
 
     def __enter__(self):
         return self
@@ -341,7 +357,41 @@ class KeyDBSession:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.aclose()
+
+    def serialize(
+        self, 
+        value: typing.Any, 
+        serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ):
+        """
+        Handles serialization
+        """
+        if serializer: return serializer(value, **kwargs)
+        if self.serializer:
+            try:
+                return self.serializer.dumps(value, **kwargs)
+            except Exception:
+                return self.encoder.encode(value)
+        return value
     
+    def deserialize(
+            self, 
+            value: typing.Any, 
+            deserializer: typing.Optional[typing.Callable] = None,
+            **kwargs
+        ):
+        """
+        Handles deserialization
+        """
+        if deserializer: return deserializer(value, **kwargs)
+        if self.serializer:
+            try:
+                return self.serializer.loads(value, **kwargs)
+            except Exception:
+                return self.encoder.decode(value)
+        return value
+
     """
     Primary Functions
     """
@@ -363,8 +413,7 @@ class KeyDBSession:
         """
         Serializes the Value using `serializer` and executes a set command
         """
-        if _serializer: value = _serializer(value)
-        elif self.serializer: value = self.serializer.dumps(value)
+        value = self.serialize(value, _serializer, **kwargs)
         return self.client.set(
             name = name,
             value = value,
@@ -397,8 +446,7 @@ class KeyDBSession:
         """
         Serializes the Value using `serializer` and executes a set command
         """
-        if _serializer: value = _serializer(value)
-        elif self.serializer: value = self.serializer.dumps(value)
+        value = self.serialize(value, _serializer, **kwargs)
         return await self.async_client.set(
             name = name,
             value = value,
@@ -429,13 +477,15 @@ class KeyDBSession:
         val = self.client.get(name)
         if not val: return default
         if _return_raw_value: return val
-        if _serializer: return _serializer(val)
-        if self.serializer:
-            try:
-                return self.serializer.loads(val, **kwargs)
-            except Exception:
-                return self.encoder.decode(val)
-        return val
+        return self.deserialize(val, _serializer, **kwargs)
+
+        # if _serializer: return _serializer(val)
+        # if self.serializer:
+        #     try:
+        #         return self.serializer.loads(val, **kwargs)
+        #     except Exception:
+        #         return self.encoder.decode(val)
+        # return val
     
     async def async_get(
         self, 
@@ -453,13 +503,14 @@ class KeyDBSession:
         val = await self.async_client.get(name)
         if not val: return default
         if _return_raw_value: return val
-        if _serializer: return _serializer(val)
-        if self.serializer:
-            try:
-                return self.serializer.loads(val, **kwargs)
-            except Exception:
-                return self.encoder.decode(val)
-        return val
+        return self.deserialize(val, _serializer, **kwargs)
+        # if _serializer: return _serializer(val)
+        # if self.serializer:
+        #     try:
+        #         return self.serializer.loads(val, **kwargs)
+        #     except Exception:
+        #         return self.encoder.decode(val)
+        # return val
     
     def delete(
         self, 
@@ -2910,7 +2961,7 @@ class KeyDBSession:
         verbose: bool = False, 
         **kwargs
     ):
-        if self._active: return
+        if self.state.active: return
         attempts = 0
         start_time = time.time()
         while True:
@@ -2921,7 +2972,7 @@ class KeyDBSession:
             try:
                 self.ping()
                 if verbose: logger.info(f'[{self.name}] KeyDB is Ready after {attempts} attempts')
-                self._active = True
+                self.state.active = True
                 break
             except (InterruptedError, KeyboardInterrupt) as e:
                 logger.error(e)
@@ -2939,7 +2990,7 @@ class KeyDBSession:
         verbose: bool = False, 
         **kwargs
     ):
-        if self._active: return
+        if self.state.active: return
         attempts = 0
         start_time = time.time()
         while True:
@@ -2951,7 +3002,7 @@ class KeyDBSession:
             try:
                 await self.async_ping()
                 if verbose: logger.info(f'[{self.name}] KeyDB is Ready after {attempts} attempts')
-                self._active = True
+                self.state.active = True
                 break
             except (InterruptedError, KeyboardInterrupt, asyncio.CancelledError) as e:
                 logger.error(e)
@@ -3075,8 +3126,8 @@ class KeyDBSession:
                         return await func(*args, **kwargs)
                     
                     # if the max attempts for connection is reached, return the function
-                    if (self._cache_max_attempts and self._cache_max_attempts > 0) \
-                         and self._cache_failed_attempts >= self._cache_max_attempts:
+                    if (self.state.cache_max_attempts and self.state.cache_max_attempts > 0) \
+                         and self.state.cache_failed_attempts >= self.state.cache_max_attempts:
                         if include_cache_hit:
                             return await func(*args, **kwargs), False
                         return await func(*args, **kwargs)
@@ -3187,7 +3238,7 @@ class KeyDBSession:
 
                         except TimeoutError:
                             logger.error(f'[{self.name}] Calling DELETE on async KeyDB timed out. Cached function: {base}')
-                            self._cache_failed_attempts += 1
+                            self.state.cache_failed_attempts += 1
 
                     try:
                         with anyio.fail_after(1):
@@ -3196,7 +3247,7 @@ class KeyDBSession:
                     except TimeoutError:
                         result = ENOVAL
                         logger.error(f'[{self.name}] Calling GET on async KeyDB timed out. Cached function: {base}')
-                        self._cache_failed_attempts += 1
+                        self.state.cache_failed_attempts += 1
 
                     is_cache_hit = result is not ENOVAL
                     if not is_cache_hit:
@@ -3214,7 +3265,7 @@ class KeyDBSession:
                                     await self.async_set(key, result, ex=cache_ttl)
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on async KeyDB timed out. Cached function: {base}')
-                                self._cache_failed_attempts += 1
+                                self.state.cache_failed_attempts += 1
                     
                     elif _invalidate_after_n_hits:
                         with anyio.fail_after(1):
@@ -3240,8 +3291,8 @@ class KeyDBSession:
                         return func(*args, **kwargs)
                     
                     # if the max attempts for connection is reached, return the function
-                    if (self._cache_max_attempts and self._cache_max_attempts > 0) \
-                         and self._cache_failed_attempts >= self._cache_max_attempts:
+                    if (self.state.cache_max_attempts and self.state.cache_max_attempts > 0) \
+                         and self.state.cache_failed_attempts >= self.state.cache_max_attempts:
                         if include_cache_hit:
                             return func(*args, **kwargs), False
                         return func(*args, **kwargs)
@@ -3335,14 +3386,14 @@ class KeyDBSession:
                             self.delete(key)
                         except TimeoutError:
                             logger.error(f'[{self.name}] Calling DELETE on KeyDB timed out. Cached function: {base}')
-                            self._cache_failed_attempts += 1
+                            self.state.cache_failed_attempts += 1
                     
                     try:
                         result = self.get(key, default = ENOVAL)
                     except TimeoutError:
                         result = ENOVAL
                         logger.error(f'[{self.name}] Calling GET on KeyDB timed out. Cached function: {base}')
-                        self._cache_failed_attempts += 1
+                        self.state.cache_failed_attempts += 1
 
                     is_cache_hit = result is not ENOVAL
                     if not is_cache_hit:
@@ -3358,7 +3409,7 @@ class KeyDBSession:
                                 self.set(key, result, ex=cache_ttl)
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on KeyDB timed out. Cached function: {base}')
-                                self._cache_failed_attempts += 1
+                                self.state.cache_failed_attempts += 1
                     
                     elif _invalidate_after_n_hits:
                         with contextlib.suppress(TimeoutError):
@@ -3402,7 +3453,7 @@ class KeyDBSession:
         return self.exists(key)
     
     def __repr__(self) -> str:
-        return f'<{self.__class__.__name__} {self.name}> {self.uri} @ {self.uri.db_id}'
+        return f'<{self.state._class__.__name__} {self.name}> {self.uri} @ {self.uri.db_id}'
     
     def __str__(self) -> str:
         return self.uri
@@ -3411,4 +3462,4 @@ class KeyDBSession:
         return self.dbsize()
     
     def __bool__(self) -> bool:
-        return self._active
+        return self.state.active

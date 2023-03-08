@@ -1,3 +1,5 @@
+import uuid
+import logging
 import asyncio
 import copy
 import enum
@@ -47,9 +49,11 @@ from aiokeydb.exceptions import (
     ResponseError,
     TimeoutError,
 )
-from aiokeydb.credentials import CredentialProvider
+from aiokeydb.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from aiokeydb.typing import EncodableT, EncodedT
 from aiokeydb.utils import HIREDIS_AVAILABLE, str_if_bytes
+
+logger = logging.getLogger(__name__)
 
 hiredis = None
 if HIREDIS_AVAILABLE:
@@ -614,6 +618,7 @@ class AsyncConnection:
         if self.is_connected:
             return
         try:
+            # logger.info('Creating New Connection')
             await self.retry.call_with_retry(
                 lambda: self._connect(), lambda error: self.disconnect()
             )
@@ -1046,6 +1051,14 @@ class AsyncSSLConnection(AsyncConnection):
     def check_hostname(self):
         return self.ssl_context.check_hostname
 
+class AsyncWorkerConnection(AsyncConnection):
+    def __init__(
+        self,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        self.uid = uuid.uuid4().hex
+
 
 class KeyDBSSLContext:
     __slots__ = (
@@ -1346,18 +1359,24 @@ class AsyncConnectionPool:
         """
         url_options = parse_url(url)
         kwargs.update(url_options)
+        # logger.info(f'spawning: {url_options}')
         return cls(**kwargs)
 
     def __init__(
         self,
         connection_class: Type[AsyncConnection] = AsyncConnection,
         max_connections: Optional[int] = None,
+        auto_pubsub: Optional[bool] = True,
+        pubsub_decode_responses: Optional[bool] = True, # automatically set decode_responses to True
+        auto_reset_enabled: Optional[bool] = True,
         **connection_kwargs,
     ):
         max_connections = max_connections or 2**31
+        # max_connections = max_connections or 50
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
 
+        
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections
@@ -1377,6 +1396,11 @@ class AsyncConnectionPool:
         self._in_use_connections: Set[AsyncConnection]
         self.reset()  # lgtm [py/init-calls-subclass]
         self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+
+        self.auto_pubsub = auto_pubsub
+        self.pubsub_decode_responses = pubsub_decode_responses
+        self._pubsub_encoder = self.get_pubsub_encoder() if self.auto_pubsub else None
+        self._auto_reset_enabled = auto_reset_enabled
 
     def __repr__(self):
         return (
@@ -1453,10 +1477,23 @@ class AsyncConnectionPool:
         self._checkpid()
         async with self._lock:
             try:
-                connection = self._available_connections.pop()
+                connection: Type[AsyncConnection] = self._available_connections.pop()
+                logger.debug(f"{command_name} {keys} {options} | Got connection: {connection}: {connection.pid} {self._created_connections}/{self.max_connections}")
+
             except IndexError:
-                connection = self.make_connection()
+                try:
+                    connection = self.make_connection()
+                except ConnectionError as e:
+                    if not self._auto_reset_enabled: raise e
+
+                    logger.warning(f'Resetting Connection Pool: {self._created_connections}/{self.max_connections}')
+                    await self.reset_pool()
+                    connection = self.make_connection()
+                    
+            
             self._in_use_connections.add(connection)
+            if command_name in {'PUBLISH', 'SUBSCRIBE', 'UNSUBSCRIBE'} and self.auto_pubsub:
+                connection.encoder = self._pubsub_encoder
 
         try:
             # ensure this connection is connected to Redis
@@ -1465,6 +1502,7 @@ class AsyncConnectionPool:
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+
             try:
                 if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
@@ -1489,6 +1527,17 @@ class AsyncConnectionPool:
             encoding_errors=kwargs.get("encoding_errors", "strict"),
             decode_responses=kwargs.get("decode_responses", False),
         )
+    
+    def get_pubsub_encoder(self):
+        """
+        Returns the pubsub encoder based on encoding settings
+        """
+        kwargs = self.connection_kwargs
+        return self.encoder_class(
+            encoding = kwargs.get("encoding", "utf-8"),
+            encoding_errors = kwargs.get("encoding_errors", "strict"),
+            decode_responses = self.pubsub_decode_responses or kwargs.get("decode_responses", True),
+        )
 
     def make_connection(self):
         """Create a new connection"""
@@ -1501,6 +1550,7 @@ class AsyncConnectionPool:
         """Releases the connection back to the pool"""
         self._checkpid()
         async with self._lock:
+            # logger.info(f'Releasing: {connection.pid}')
             try:
                 self._in_use_connections.remove(connection)
             except KeyError:
@@ -1510,18 +1560,20 @@ class AsyncConnectionPool:
 
             if self.owns_connection(connection):
                 self._available_connections.append(connection)
+                # logger.info(f'Releasing: {connection.pid} - Owned')
             else:
                 # pool doesn't own this connection. do not add it back
                 # to the pool and decrement the count so that another
                 # connection can take its place if needed
                 self._created_connections -= 1
                 await connection.disconnect()
+                # logger.info(f'Releasing: {connection.pid} - Unowned : {self._created_connections}')
                 return
 
     def owns_connection(self, connection: AsyncConnection):
         return connection.pid == self.pid
 
-    async def disconnect(self, inuse_connections: bool = True):
+    async def disconnect(self, inuse_connections: bool = True, raise_exceptions: bool = True):
         """
         Disconnects connections in the pool
 
@@ -1542,7 +1594,7 @@ class AsyncConnectionPool:
                 return_exceptions=True,
             )
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
+            if exc and raise_exceptions:
                 raise exc
 
 
@@ -1551,7 +1603,13 @@ class AsyncConnectionPool:
             conn.retry = retry
         for conn in self._in_use_connections:
             conn.retry = retry
-        
+    
+    async def reset_pool(self, inuse_connections: bool = True, raise_exceptions: bool = False):
+        """
+        Resets the connection pool
+        """
+        await self.disconnect(inuse_connections = inuse_connections, raise_exceptions = raise_exceptions)
+        self.reset()
 
 class AsyncBlockingConnectionPool(AsyncConnectionPool):
     """
@@ -1589,13 +1647,14 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
 
     def __init__(
         self,
-        max_connections: int = 50,
+        max_connections: Optional[int] = None,
         timeout: Optional[int] = 20,
         connection_class: Type[AsyncConnection] = AsyncConnection,
         queue_class: Type[asyncio.Queue] = asyncio.LifoQueue,
         **connection_kwargs,
     ):
 
+        max_connections = max_connections or 50
         self.queue_class = queue_class
         self.timeout = timeout
         self._connections: List[AsyncConnection]
@@ -1656,16 +1715,25 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
         try:
             async with async_timeout.timeout(self.timeout):
                 connection = await self.pool.get()
+                # logger.info(f"Got connection: {connection}")
+
         except (asyncio.QueueEmpty, asyncio.TimeoutError) as e:
-            # Note that this is not caught by the redis client and will be
-            # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available")
-            # raise ConnectionError(f"No connection available {e}: {self.connection_kwargs}, timeout: {self.timeout}, max_conn: {self.max_connections}, pool: {self.pool}")
+            if not self._auto_reset_enabled:
+                raise ConnectionError(
+                    "No connection available. Try enabling `auto_reset_enabled`"
+                ) from e
+
+            logger.warning(f'Resetting Pool: {len(self._connections)}/{self.pool.qsize()}/{self.max_connections} due to error: {e}')
+            await self.reset_pool()
+
+                # raise ConnectionError(f"No connection available {e}: {self.connection_kwargs}, timeout: {self.timeout}, max_conn: {self.max_connections}, pool: {self.pool}")
 
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
         if connection is None:
             connection = self.make_connection()
+
+        logger.debug(f"{command_name} {keys} {options} | Got connection: {connection} | {len(self._connections)}/{self.pool.qsize()}/{self.max_connections} ")
 
         try:
             # ensure this connection is connected to Redis
@@ -1674,6 +1742,10 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+
+            if command_name in {'PUBLISH', 'SUBSCRIBE', 'UNSUBSCRIBE'} and self.auto_pubsub:
+                connection.encoder = self._pubsub_encoder
+
             try:
                 if await connection.can_read_destructive():
                     raise ConnectionError("Connection has data") from None
@@ -1682,7 +1754,8 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
                 await connection.connect()
                 if await connection.can_read_destructive():
                     raise ConnectionError("Connection not ready") from None
-        
+
+
         except BaseException:
             # release the connection back to the pool so that we don't leak it
             await self.release(connection)
@@ -1701,17 +1774,26 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             # its needed.
             await connection.disconnect()
             self.pool.put_nowait(None)
+            # self.pool.task_done()
+            # self.pool._queue.remove(connection)
             return
 
         # Put the connection back into the pool.
         try:
+            # logger.info(f'Release connection: {connection}')
             self.pool.put_nowait(connection)
+        
         except asyncio.QueueFull:
             # perhaps the pool has been reset() after a fork? regardless,
             # we don't want this connection
-            pass
+            if self._auto_reset_enabled:
+                logger.warning(f'Resetting Pool: {len(self._connections)}/{self.pool.qsize()}/{self.max_connections} due to queue full')
+                await self.reset_pool()
+            
+            # self.reset()
+            # pass
 
-    async def disconnect(self, inuse_connections: bool = True):
+    async def disconnect(self, inuse_connections: bool = True, raise_exceptions: bool = True):
         """Disconnects all connections in the pool."""
         self._checkpid()
         async with self._lock:
@@ -1720,5 +1802,5 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
                 return_exceptions=True,
             )
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
-            if exc:
+            if exc and raise_exceptions:
                 raise exc

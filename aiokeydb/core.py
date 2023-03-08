@@ -260,6 +260,10 @@ class KeyDB(AbstractKeyDB, RedisModuleCommands, CoreCommands, SentinelCommands):
     It is not safe to pass PubSub or Pipeline objects between threads.
     """
 
+    @property
+    def is_async(self):
+        return False
+
     @classmethod
     def from_url(
         cls, 

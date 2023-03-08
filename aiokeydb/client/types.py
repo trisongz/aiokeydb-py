@@ -3,6 +3,7 @@ import pathlib
 import typing
 import threading
 import functools
+import hashlib
 
 from pydantic import validator, Field
 from pydantic import BaseSettings as _BaseSettings
@@ -446,5 +447,12 @@ class KeyDBUri(BaseModel):
 
     def __repr__(self):
         return f'<KeyDBUri {self.uri_no_auth}>'
+    
+    @lazyproperty
+    def key(self):
+        """
+        Returns the hashkey for the uri
+        """
+        return hashlib.md5(self.uri.encode('ascii')).hexdigest()
 
 

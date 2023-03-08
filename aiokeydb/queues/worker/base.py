@@ -272,7 +272,7 @@ class Worker:
         functions: typing.Set[typing.Callable] = set(functions or WorkerTasks.get_functions(verbose = self.debug_enabled))
         self.functions = {}
         self.cron_jobs: typing.List[CronJob] = cron_jobs or WorkerTasks.get_cronjobs()
-        self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(threadpool_size), "vars": {}}
+        # self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(threadpool_size), "vars": {}}
         self.tasks: typing.Set[asyncio.Task] = set()
         self.job_task_contexts: typing.Dict['Job', typing.Dict[str, typing.Any]] = {}
         self.dequeue_timeout = dequeue_timeout
@@ -329,7 +329,8 @@ class Worker:
             self.logger(kind = "startup").warning(
                 f'{self.settings.app_name or "KeyDBWorker"}: {self.name} is disabled.')
             return
-
+        
+        self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(), "vars": {}}
         self.worker_attributes['name'] = self.name
         self.queue._worker_name = self.name
         self.logger(kind = "startup").info(
@@ -339,6 +340,8 @@ class Worker:
             loop = asyncio.get_running_loop()
 
             for signum in self.SIGNALS: loop.add_signal_handler(signum, self.event.set)
+            await self.queue.ctx.async_client.initialize()
+
             if self.startup: 
                 for func in self.startup:
                     await func(self.context)

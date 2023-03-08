@@ -39,5 +39,5 @@ from aiokeydb.asyncio.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
 from aiokeydb.client.serializers import SerializerType, BaseSerializer
 from aiokeydb.client.config import KeyDBSettings
 from aiokeydb.client.schemas.session import KeyDBSession
-from aiokeydb.client.core import KeyDBClient
+from aiokeydb.client.meta import KeyDBClient
 

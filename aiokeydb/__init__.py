@@ -57,7 +57,7 @@ from aiokeydb.asyncio import (
 from aiokeydb.client.serializers import SerializerType
 from aiokeydb.client.config import KeyDBSettings
 from aiokeydb.client.schemas.session import KeyDBSession
-from aiokeydb.client.core import KeyDBClient
+from aiokeydb.client.meta import KeyDBClient
 
 if sys.version_info >= (3, 8):
     from importlib import metadata

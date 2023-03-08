@@ -2,14 +2,14 @@ import json
 import time
 import asyncio
 import typing
-
+import threading
 from contextlib import asynccontextmanager, suppress
 from lazyops.utils.logs import default_logger as logger
 
 from aiokeydb.client.types import KeyDBUri, lazyproperty
 from lazyops.utils.serialization import ObjectEncoder
 from aiokeydb.client.serializers import SerializerType
-from aiokeydb.client.core import KeyDBClient
+from aiokeydb.client.meta import KeyDBClient
 from aiokeydb.client.schemas.session import KeyDBSession
 from aiokeydb.connection import ConnectionPool, BlockingConnectionPool
 from aiokeydb.asyncio.connection import AsyncConnectionPool, AsyncBlockingConnectionPool
@@ -91,27 +91,12 @@ class TaskQueue:
         self.prefix = prefix if prefix is not None else self.settings.worker.prefix
         self.queue_name = queue_name if queue_name is not None else self.settings.worker.queue_name
         self.serializer = serializer if serializer is not None else self.settings.worker.job_serializer.get_serializer()
-        db = db if db is not None else self.settings.worker.db
-        self.ctx: KeyDBSession = KeyDBClient.create_session(
-            name = self.queue_name,
-            db_id = db,
-            serializer = None,
-            cache_enabled = False,
-            _decode_responses = False,
-            set_current = False,
-            retry_on_timeout = True,
-            health_check_interval = heartbeat_ttl,
-            # socket_timeout = 5,
-            socket_connect_timeout = 15,
-            socket_keepalive = True,
-            # connection_pool_cls = BlockingConnectionPool,
-            # async_connection_pool_cls = AsyncBlockingConnectionPool,
-            # single_connection_client = True,
-            # timeout = 20,
-            **kwargs,
-        )
-        self.uri: KeyDBUri = self.ctx.uri
-        self.db_id = self.uri.db_id
+        
+        self._ctx_kwargs = {
+            'db_id': db if db is not None else self.settings.worker.db,
+            **kwargs        
+        }
+
 
         self.client_mode = client_mode
 
@@ -145,6 +130,48 @@ class TaskQueue:
         if not self.silenced_functions:
             self._set_silenced_functions()
     
+    @lazyproperty
+    def _lock(self) -> asyncio.Lock:
+        return asyncio.Lock()
+    
+    @lazyproperty
+    def ctx(self) -> KeyDBSession:
+        return KeyDBClient.create_session(
+            name = self.queue_name,
+            serializer = False,
+            cache_enabled = False,
+            decode_responses = False,
+            auto_pubsub = False,
+            set_current = False,
+            retry_on_timeout = True,
+            health_check_interval = self.heartbeat_ttl,
+            socket_connect_timeout = 60,
+            socket_keepalive = True,
+
+            max_connections = self.max_concurrency * 10,
+            pool_class = BlockingConnectionPool,
+
+            amax_connections = self.max_concurrency ** 2,
+            apool_class = AsyncBlockingConnectionPool,
+            **self._ctx_kwargs
+        )
+
+    
+    @lazyproperty
+    def version(self):
+        # if not self._version:
+        #     self.
+        info = self.ctx.info()
+        return tuple(int(i) for i in info["redis_version"].split("."))
+    
+    @lazyproperty
+    def uri(self) -> KeyDBUri:
+        return self.ctx.uri
+
+    @lazyproperty
+    def db_id(self):
+        return self.ctx.db_id
+
     def _set_silenced_functions(self):
         from aiokeydb.queues.worker import WorkerTasks
         self.silenced_functions = list(set(WorkerTasks.silenced_functions))
@@ -301,9 +328,7 @@ class TaskQueue:
                         stop = await callback(job_key, status)
                     else:
                         stop = callback(job_key, status)
-
-                    if stop:
-                        break
+                    if stop: break
 
         try:
             if timeout:
@@ -455,8 +480,13 @@ class TaskQueue:
         if postfix:
             queued_key = f'{self.queued_key}:{postfix}'
             active_key = f'{self.active_key}:{postfix}'
-        if await self.version() < (6, 2, 0):
-            return await self.ctx.async_client.brpoplpush(queued_key, active_key, timeout)
+        if self.version < (6, 2, 0):
+            return await self.ctx.async_client.brpoplpush(
+                queued_key, 
+                active_key, 
+                timeout
+            )
+        # logger.info(f'BLMOVE: {queued_key}')
         return await self.ctx.async_client.execute_command(
             "BLMOVE", queued_key, active_key, "RIGHT", "LEFT", timeout
         )
@@ -1096,12 +1126,16 @@ class TaskQueue:
     """
     Queue Metadata
     """
+    
 
-    async def version(self):
-        if not self._version:
-            info = await self.ctx.async_info()
-            self._version = tuple(int(i) for i in info["redis_version"].split("."))
-        return self._version
+
+    # async def version(self):
+    #     if not self._version:
+    #         async with self._lock:
+    #             info = await self.ctx.async_info()
+    #             self._version = tuple(int(i) for i in info["redis_version"].split("."))
+    #         logger.info(f"{self.queue_name} | Fetched Version: {self._version}")
+    #     return self._version
 
     async def fetch_job_info(
         self,

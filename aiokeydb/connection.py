@@ -7,6 +7,7 @@ import socket
 import threading
 import typing
 import weakref
+import logging
 from itertools import chain
 from queue import Empty, Full, LifoQueue
 from time import time
@@ -35,6 +36,8 @@ from aiokeydb.exceptions import (
 )
 from aiokeydb.retry import Retry
 from aiokeydb.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes
+
+logger = logging.getLogger(__name__)
 
 try:
     import ssl
@@ -1369,7 +1372,14 @@ class ConnectionPool:
         return cls(**kwargs)
 
     def __init__(
-        self, connection_class=Connection, max_connections=None, **connection_kwargs
+        self, 
+        connection_class=Connection, 
+        max_connections=None, 
+        auto_pubsub: typing.Optional[bool] = True,
+        pubsub_decode_responses: typing.Optional[bool] = True, # automatically set decode_responses to True
+        auto_reset_enabled: typing.Optional[bool] = True,
+
+        **connection_kwargs
     ):
         max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
@@ -1389,6 +1399,12 @@ class ConnectionPool:
         # release the lock.
         self._fork_lock = threading.Lock()
         self.reset()
+        self.encoder_class = self.connection_kwargs.get("encoder_class", Encoder)
+
+        self.auto_pubsub = auto_pubsub
+        self.pubsub_decode_responses = pubsub_decode_responses
+        self._pubsub_encoder = self.get_pubsub_encoder() if self.auto_pubsub else None
+        self._auto_reset_enabled = auto_reset_enabled
 
     def __repr__(self):
         return (
@@ -1399,8 +1415,8 @@ class ConnectionPool:
     def reset(self):
         self._lock = threading.Lock()
         self._created_connections = 0
-        self._available_connections = []
-        self._in_use_connections = set()
+        self._available_connections: typing.List[typing.Type[Connection]] = []
+        self._in_use_connections: typing.Set[typing.Type[Connection]] = set()
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1467,9 +1483,19 @@ class ConnectionPool:
             try:
                 connection = self._available_connections.pop()
             except IndexError:
-                connection = self.make_connection()
+                try:
+                    connection = self.make_connection()
+                except ConnectionError as e:
+                    if not self._auto_reset_enabled: raise e
+                    logger.warning(f'Resetting Connection Pool: {self._created_connections}/{self.max_connections}')
+                    self.reset_pool()
+                    connection = self.make_connection()
+
+                # connection = self.make_connection()
             self._in_use_connections.add(connection)
 
+            if command_name in {'PUBLISH', 'SUBSCRIBE', 'UNSUBSCRIBE'} and self.auto_pubsub:
+                connection.encoder = self._pubsub_encoder
         try:
             # ensure this connection is connected to KeyDB
             connection.connect()
@@ -1477,6 +1503,8 @@ class ConnectionPool:
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+
+            
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
@@ -1501,6 +1529,18 @@ class ConnectionPool:
             encoding_errors=kwargs.get("encoding_errors", "strict"),
             decode_responses=kwargs.get("decode_responses", False),
         )
+    
+
+    def get_pubsub_encoder(self):
+        """
+        Returns the pubsub encoder based on encoding settings
+        """
+        kwargs = self.connection_kwargs
+        return self.encoder_class(
+            encoding = kwargs.get("encoding", "utf-8"),
+            encoding_errors = kwargs.get("encoding_errors", "strict"),
+            decode_responses = self.pubsub_decode_responses or kwargs.get("decode_responses", True),
+        )
 
     def make_connection(self):
         "Create a new connection"
@@ -1509,12 +1549,13 @@ class ConnectionPool:
         self._created_connections += 1
         return self.connection_class(**self.connection_kwargs)
 
-    def release(self, connection):
+    def release(self, connection: typing.Type[Connection]):
         "Releases the connection back to the pool"
         self._checkpid()
         with self._lock:
             try:
                 self._in_use_connections.remove(connection)
+            
             except KeyError:
                 # Gracefully fail when a connection is returned to this pool
                 # that the pool doesn't actually own
@@ -1530,10 +1571,10 @@ class ConnectionPool:
                 connection.disconnect()
                 return
 
-    def owns_connection(self, connection):
+    def owns_connection(self, connection: typing.Type[Connection]):
         return connection.pid == self.pid
 
-    def disconnect(self, inuse_connections=True):
+    def disconnect(self, inuse_connections=True, raise_exceptions: bool = True):
         """
         Disconnects connections in the pool
 
@@ -1551,8 +1592,18 @@ class ConnectionPool:
                 connections = self._available_connections
 
             for connection in connections:
-                connection.disconnect()
+                try:
+                    connection.disconnect()
+                except Exception as e:
+                    if raise_exceptions: raise e
+                
 
+    def reset_pool(self, inuse_connections: bool = True, raise_exceptions: bool = False):
+        """
+        Resets the connection pool
+        """
+        self.disconnect(inuse_connections = inuse_connections, raise_exceptions = raise_exceptions)
+        self.reset()
 
 class BlockingConnectionPool(ConnectionPool):
     """
@@ -1590,13 +1641,14 @@ class BlockingConnectionPool(ConnectionPool):
 
     def __init__(
         self,
-        max_connections=50,
+        max_connections: typing.Optional[int] = None,
         timeout=20,
         connection_class=Connection,
         queue_class=LifoQueue,
         **connection_kwargs,
     ):
-
+        
+        max_connections = max_connections or 50
         self.queue_class = queue_class
         self.timeout = timeout
         super().__init__(
@@ -1616,7 +1668,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         # Keep a list of actual connection instances so that we can
         # disconnect them later.
-        self._connections = []
+        self._connections: typing.List[typing.Type[Connection]] = []
 
         # this must be the last operation in this method. while reset() is
         # called when holding _fork_lock, other threads in this process
@@ -1655,10 +1707,15 @@ class BlockingConnectionPool(ConnectionPool):
         connection = None
         try:
             connection = self.pool.get(block=True, timeout=self.timeout)
-        except Empty:
+        except Empty as e:
             # Note that this is not caught by the redis client and will be
             # raised unless handled by application code. If you want never to
-            raise ConnectionError("No connection available.")
+            if not self._auto_reset_enabled:
+                raise ConnectionError(
+                    "No connection available. Try enabling `auto_reset_enabled`."
+                ) from e
+            logger.warning(f'Resetting Pool: {len(self._connections)}/{self.pool.qsize()}/{self.max_connections} due to error: {e}')
+            self.reset_pool()
 
         # If the ``connection`` is actually ``None`` then that's a cue to make
         # a new connection to add to the pool.
@@ -1672,6 +1729,10 @@ class BlockingConnectionPool(ConnectionPool):
             # a command. if not, the connection was either returned to the
             # pool before all data has been read or the socket has been
             # closed. either way, reconnect and verify everything is good.
+
+            if command_name in {'PUBLISH', 'SUBSCRIBE', 'UNSUBSCRIBE'} and self.auto_pubsub:
+                connection.encoder = self._pubsub_encoder
+
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
@@ -1687,7 +1748,7 @@ class BlockingConnectionPool(ConnectionPool):
 
         return connection
 
-    def release(self, connection):
+    def release(self, connection: typing.Type[Connection]):
         "Releases the connection back to the pool."
         # Make sure we haven't changed process.
         self._checkpid()
@@ -1703,13 +1764,20 @@ class BlockingConnectionPool(ConnectionPool):
         # Put the connection back into the pool.
         try:
             self.pool.put_nowait(connection)
+        
         except Full:
             # perhaps the pool has been reset() after a fork? regardless,
             # we don't want this connection
-            pass
+            if self._auto_reset_enabled:
+                logger.warning(f'Resetting Pool: {len(self._connections)}/{self.pool.qsize()}/{self.max_connections} due to queue full')
+                self.reset_pool()
 
-    def disconnect(self):
+
+    def disconnect(self, raise_exceptions: bool = True, **kwargs):
         "Disconnects all connections in the pool."
         self._checkpid()
         for connection in self._connections:
-            connection.disconnect()
+            try:
+                connection.disconnect()
+            except Exception as e:
+                if raise_exceptions: raise e

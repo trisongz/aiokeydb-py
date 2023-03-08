@@ -1,3 +1,4 @@
+import logging
 import asyncio
 import copy
 import inspect
@@ -59,6 +60,8 @@ from aiokeydb.exceptions import (
 from aiokeydb.typing import ChannelT, EncodableT, KeyT
 from aiokeydb.utils import safe_str, str_if_bytes
 
+logger = logging.getLogger(__name__)
+
 PubSubHandler = Callable[[Dict[str, str]], Awaitable[None]]
 _KeyT = TypeVar("_KeyT", bound=KeyT)
 _ArgT = TypeVar("_ArgT", KeyT, EncodableT)
@@ -97,6 +100,10 @@ class AsyncKeyDB(
     """
 
     response_callbacks: MutableMapping[Union[str, bytes], ResponseCallbackT]
+
+    @property
+    def is_async(self):
+        return True
 
     @classmethod
     def from_url(
@@ -509,6 +516,7 @@ class AsyncKeyDB(
         pool = self.connection_pool
         command_name = args[0]
         conn = self.connection or await pool.get_connection(command_name, **options)
+        # logger.info(f'Executing command: {command_name}')
 
         if self.single_connection_client:
             await self._single_conn_lock.acquire()
