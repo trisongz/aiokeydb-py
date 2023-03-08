@@ -1,5 +1,14 @@
 # aiokeydb changelogs
 
+## 0.1.18 (2023-03-08)
+  - Resolve ConnectionPools with reset capabilities
+  - Refactor `KeyDBSession` to utilize the ConnectionPool initialized by `KeyDBClient`
+  - Refactor `KeyDBClient` to initialize Sessions using shared connection pools for async and sync in order to avoid spawning a new connection pool per session.
+  - Moved certain class vars to its own state for `KeyDBSesssion`
+  - Reorder Worker Queue initialization to prevent overlapping event loops
+  - Implement certain changes from `redis-py`
+  - kept previous `KeyDBClient` that is accessible via `aiokeydb.client.core` vs `aiokeydb.client.meta`
+
 ## 0.1.7 (2023-02-01)
   - Resolve worker issues for startup ctx
 
