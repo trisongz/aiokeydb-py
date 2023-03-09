@@ -51,7 +51,7 @@ from aiokeydb.exceptions import (
 )
 from aiokeydb.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from aiokeydb.typing import EncodableT, EncodedT
-from aiokeydb.utils import HIREDIS_AVAILABLE, str_if_bytes
+from aiokeydb.utils import HIREDIS_AVAILABLE, str_if_bytes, set_ulimits
 
 logger = logging.getLogger(__name__)
 
@@ -677,6 +677,7 @@ class AsyncConnection:
                 # `socket_keepalive_options` might contain invalid options
                 # causing an error. Do not leave the connection open.
                 writer.close()
+                await writer.wait_closed()
                 raise
 
     def _error_message(self, exception):
@@ -1375,8 +1376,10 @@ class AsyncConnectionPool:
         # max_connections = max_connections or 50
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
-
-        
+        try:
+            set_ulimits(max_connections)
+        except Exception as e:
+            logger.warning(f"Unable to set ulimits for connection: {e}")
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections

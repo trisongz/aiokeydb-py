@@ -35,7 +35,7 @@ from aiokeydb.exceptions import (
     TimeoutError,
 )
 from aiokeydb.retry import Retry
-from aiokeydb.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes
+from aiokeydb.utils import CRYPTOGRAPHY_AVAILABLE, HIREDIS_AVAILABLE, HIREDIS_PACK_AVAILABLE, str_if_bytes, set_ulimits
 
 logger = logging.getLogger(__name__)
 
@@ -1384,7 +1384,10 @@ class ConnectionPool:
         max_connections = max_connections or 2**31
         if not isinstance(max_connections, int) or max_connections < 0:
             raise ValueError('"max_connections" must be a positive integer')
-
+        try:
+            set_ulimits(max_connections)
+        except Exception as e:
+            logger.warning(f"Unable to set ulimits for connection: {e}")
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections

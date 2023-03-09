@@ -1,5 +1,8 @@
 # aiokeydb changelogs
 
+## 0.1.19 (2023-03-08)
+  - Add utility to set ulimits when initializing the connection pool.
+
 ## 0.1.18 (2023-03-08)
   - Resolve ConnectionPools with reset capabilities
   - Refactor `KeyDBSession` to utilize the ConnectionPool initialized by `KeyDBClient`

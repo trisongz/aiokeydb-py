@@ -1,3 +1,4 @@
+import logging
 from contextlib import contextmanager
 from typing import Any, Dict, Mapping, Union
 
@@ -18,6 +19,7 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
+logger = logging.getLogger(__name__)
 
 def from_url(url, asyncio: bool = False, **kwargs):
     """
@@ -85,3 +87,23 @@ def merge_result(command, res):
             result.add(value)
 
     return list(result)
+
+
+def set_ulimits(max_connections: int = 500):
+    """
+    Sets the system ulimits
+    to allow for the maximum number of open connections
+
+    - if the current ulimit > max_connections, then it is ignored
+    - if it is less, then we set it.
+    """
+    import resource
+
+    soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if soft_limit > max_connections: return
+    if hard_limit < max_connections:
+        logger.warning(f"The current hard limit ({hard_limit}) is less than max_connections ({max_connections}).")
+    new_hard_limit = max(hard_limit, max_connections)
+    logger.info(f"Setting new ulimits to ({soft_limit}, {hard_limit}) -> ({max_connections}, {new_hard_limit})")
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max_connections, new_hard_limit))
+
