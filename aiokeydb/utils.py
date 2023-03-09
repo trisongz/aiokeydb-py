@@ -105,5 +105,7 @@ def set_ulimits(max_connections: int = 500):
         logger.warning(f"The current hard limit ({hard_limit}) is less than max_connections ({max_connections}).")
     new_hard_limit = max(hard_limit, max_connections)
     logger.info(f"Setting new ulimits to ({soft_limit}, {hard_limit}) -> ({max_connections}, {new_hard_limit})")
-    resource.setrlimit(resource.RLIMIT_NOFILE, (max_connections, new_hard_limit))
+    resource.setrlimit(resource.RLIMIT_NOFILE, (max_connections + 10, new_hard_limit))
+    new_soft, new_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    logger.info(f"New Limits: ({new_soft}, {new_hard})")
 
