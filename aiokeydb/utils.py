@@ -89,6 +89,11 @@ def merge_result(command, res):
     return list(result)
 
 
+def get_ulimits():
+    import resource
+    soft_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+    return soft_limit
+
 def set_ulimits(max_connections: int = 500):
     """
     Sets the system ulimits

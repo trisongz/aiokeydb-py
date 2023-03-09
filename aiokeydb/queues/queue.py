@@ -37,6 +37,7 @@ from lazyops.imports._aiohttpx import (
     require_aiohttpx
 )
 
+from aiokeydb.utils import set_ulimits, get_ulimits
 
 
 class TaskQueue:
@@ -224,7 +225,42 @@ class TaskQueue:
 
     async def disconnect(self):
         await self.ctx.aclose()
+
     
+    async def prepare_server(self):
+        """
+        Prepares the keydb server to ensure that the maximum number of concurrent
+        connections are available.
+        """
+        info = await self.ctx.async_info()
+        await self.prepare_for_broadcast()
+
+        # Each Worker spawns a connection
+        min_connections = ((self.num_workers or 1) * self.max_concurrency) * 10
+
+        curr_max_connections = info['maxclients']
+        curr_connected = info['connected_clients']
+
+        new_max_connections = max(
+            min_connections,
+            (curr_connected + min_connections),
+            curr_max_connections
+        )
+        curr_ulimits = get_ulimits()
+        if curr_ulimits < new_max_connections:
+            logger.debug(f'The maximum number of concurrent connections may not be supported as ulimits: {curr_ulimits} < desired max connections: {new_max_connections}')
+
+        logger.info(f'Configuring Server: Current Max Connections: {curr_max_connections}, Current Connected: {curr_connected}, Min Connections: {min_connections} -> New Max: {new_max_connections}')
+        if new_max_connections > curr_max_connections:
+            try:
+                await self.ctx.config_set('maxclients', new_max_connections)
+                info = await self.ctx.async_info()
+                new_set_max_connections = info['maxclients']
+                logger.debug(f'New Max Connections: {new_set_max_connections}')
+            except Exception as e:
+                logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
+
+
     """
     Primary APIs
     """

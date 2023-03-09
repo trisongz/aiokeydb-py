@@ -321,6 +321,13 @@ class Worker:
         if self.after_process:
             await self.after_process(ctx)
     
+    async def prepare_server(self):
+        """
+        Prepares the keydb server to ensure that the maximum number of concurrent
+        connections are available.
+        """
+        await self.queue.prepare_server()
+
 
     async def start(self):
         """Start processing jobs and upkeep tasks."""
@@ -358,6 +365,9 @@ class Worker:
             # await self.queue.register_queue()
             # Send the first heartbeat
             await self.heartbeat()
+
+            # Prepare the server
+            await self.prepare_server()
 
             self.tasks.update(await self.upkeep())
             for _ in range(self.concurrency):
