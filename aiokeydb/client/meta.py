@@ -43,6 +43,9 @@ class KeyDBClientMeta(type):
             cls._settings = KeyDBSettings()
         return cls._settings
     
+    def get_settings(cls, **kwargs):
+        return cls.settings
+    
     @property
     def ctx(cls) -> KeyDBSession:
         if not cls._ctx:
