@@ -49,6 +49,11 @@ class KeyDBWorkerSettings(BaseSettings):
     token: Optional[str] = ''
     debug_enabled: Optional[bool] = False
 
+    socket_keepalive: Optional[bool] = True
+    socket_connect_timeout: Optional[int] = 60
+    heartbeat_interval: Optional[int] = 10
+    retry_on_timeout: Optional[bool] = True
+
 
     class Config:
         case_sensitive = False

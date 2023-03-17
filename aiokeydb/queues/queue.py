@@ -84,7 +84,7 @@ class TaskQueue:
         truncate_logs: typing.Optional[bool] = True,
         logging_max_length: typing.Optional[int] = 500,
         silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
-        heartbeat_ttl: typing.Optional[int] = 10,
+        heartbeat_ttl: typing.Optional[int] = None, # 10,
         **kwargs
     ):
     
@@ -126,7 +126,7 @@ class TaskQueue:
         self.truncate_logs = truncate_logs
         self.logging_max_length = logging_max_length
         self.silenced_functions = silenced_functions or []
-        self.heartbeat_ttl = heartbeat_ttl
+        self.heartbeat_ttl = heartbeat_ttl or self.settings.worker.heartbeat_interval
         self._worker_name: str = None
         if not self.silenced_functions:
             self._set_silenced_functions()
@@ -137,6 +137,15 @@ class TaskQueue:
     
     @lazyproperty
     def ctx(self) -> KeyDBSession:
+        if 'socket_connect_timeout' not in self._ctx_kwargs:
+            self._ctx_kwargs['socket_connect_timeout'] = self.settings.worker.socket_connect_timeout
+        if 'socket_keepalive' not in self._ctx_kwargs:
+            self._ctx_kwargs['socket_keepalive'] = self.settings.worker.socket_keepalive
+        if 'health_check_interval' not in self._ctx_kwargs:
+            self._ctx_kwargs['health_check_interval'] = self.heartbeat_ttl
+        if 'retry_on_timeout' not in self._ctx_kwargs:
+            self._ctx_kwargs['retry_on_timeout'] = self.settings.worker.retry_on_timeout
+
         return KeyDBClient.create_session(
             name = self.queue_name,
             serializer = False,
@@ -144,10 +153,10 @@ class TaskQueue:
             decode_responses = False,
             auto_pubsub = False,
             set_current = False,
-            retry_on_timeout = True,
-            health_check_interval = self.heartbeat_ttl,
-            socket_connect_timeout = 60,
-            socket_keepalive = True,
+            # retry_on_timeout = True,
+            # health_check_interval = self.heartbeat_ttl,
+            # socket_connect_timeout = self.settings. # 60,
+            # socket_keepalive = True,
 
             max_connections = self.max_concurrency * 10,
             pool_class = BlockingConnectionPool,
