@@ -3216,37 +3216,73 @@ class KeyDBSession:
                     if _invalidate_after_n_hits:
                         _hits_key = f'{key}:hits'
                         _num_hits = 0
-                        with anyio.fail_after(1):
-                            # logger.info(f'Retrieving: {_hits_key}')
-                            # _num_hits = await self.async_client.get(_hits_key)
-                            _num_hits = await self.async_get(_hits_key)
-                            if _num_hits: _num_hits = int(_num_hits)
-                            # logger.info(f'Retrieving: {_num_hits}')
+                        with contextlib.suppress(Exception):
+                            with anyio.fail_after(1):
+                                _num_hits = await self.async_get(_hits_key)
+                                if _num_hits: _num_hits = int(_num_hits)
+
+                        # try:
+                        #     with anyio.fail_after(1):
+                        #         # logger.info(f'Retrieving: {_hits_key}')
+                        #         # _num_hits = await self.async_client.get(_hits_key)
+                        #         _num_hits = await self.async_get(_hits_key)
+                        #         if _num_hits: _num_hits = int(_num_hits)
+                        #         # logger.info(f'Retrieving: {_num_hits}')
+                        # except TimeoutError:
+                        #     logger.error(f'[{self.name}] Calling GET on async KeyDB timed out. Cached function: {base}')
+                        #     # self.state.cache_failed_attempts += 1
+                        # except Exception as e:
+                        #     logger.error(f'[{self.name}] Calling GET on async KeyDB failed. Cached function: {base}: {e}')
+                        #     # self.state.cache_failed_attempts += 1
 
                         if _num_hits and _num_hits > _invalidate_after_n_hits:
                             _invalidate_key = True
                             # logger.info(f'[{self.name}] Invalidating cache key: {key} after {_num_hits} hits')
-                            with anyio.fail_after(1):
-                                await self.async_delete(_hits_key)
+                            with contextlib.suppress(Exception):
+                                with anyio.fail_after(1):
+                                    await self.async_delete(key)
+                            # try:
+                            #     with anyio.fail_after(1):
+                            #         await self.async_delete(_hits_key)
+                            # except TimeoutError:
+                            #     logger.error(f'[{self.name}] Calling DELETE on async KeyDB timed out. Cached function: {base}')
+                            #     # self.state.cache_failed_attempts += 1
+                            # except Exception as e:
+                            #     logger.error(f'[{self.name}] Calling DELETE on async KeyDB failed. Cached function: {base}: {e}')
+                            #     # self.state.cache_failed_attempts += 1
 
                     if _invalidate_key:
                         if self.settings.debug_enabled:
                             logger.info(f'[{self.name}] Invalidating cache key: {key}')
-                        try:
+                        with contextlib.suppress(Exception):
                             with anyio.fail_after(1):
                                 await self.async_delete(key)
 
-                        except TimeoutError:
-                            logger.error(f'[{self.name}] Calling DELETE on async KeyDB timed out. Cached function: {base}')
-                            self.state.cache_failed_attempts += 1
+                        # try:
+                        #     with anyio.fail_after(1):
+                        #         await self.async_delete(key)
 
+                        # except TimeoutError:
+                        #     logger.error(f'[{self.name}] Calling DELETE on async KeyDB timed out. Cached function: {base}')
+                        #     # self.state.cache_failed_attempts += 1
+                        
+                        # except Exception as e:
+                        #     logger.error(f'[{self.name}] Calling DELETE on async KeyDB failed. Cached function: {base}: {e}')
+                        #     # self.state.cache_failed_attempts += 1
+
+                    # result = ENOVAL
                     try:
                         with anyio.fail_after(1):
                             result = await self.async_get(key, default = ENOVAL)
-
+                    
                     except TimeoutError:
                         result = ENOVAL
                         logger.error(f'[{self.name}] Calling GET on async KeyDB timed out. Cached function: {base}')
+                        self.state.cache_failed_attempts += 1
+                    
+                    except Exception as e:
+                        result = ENOVAL
+                        logger.error(f'[{self.name}] Calling GET on async KeyDB failed. Cached function: {base}: {e}')
                         self.state.cache_failed_attempts += 1
 
                     is_cache_hit = result is not ENOVAL
@@ -3266,12 +3302,29 @@ class KeyDBSession:
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on async KeyDB timed out. Cached function: {base}')
                                 self.state.cache_failed_attempts += 1
+                            
+                            except Exception as e:
+                                logger.error(f'[{self.name}] Calling SET on async KeyDB failed. Cached function: {base}: {e}')
+                                self.state.cache_failed_attempts += 1
+
                     
                     elif _invalidate_after_n_hits:
-                        with anyio.fail_after(1):
-                            # logger.info(f'[{self.name}] Calling INCR on async KeyDB. Cached function: {_hits_key}')
-                            await self.async_incr(_hits_key)
-                            # await self.async_set(_hits_key, _num_hits)
+                        with contextlib.suppress(Exception):
+                            with anyio.fail_after(1):
+                                await self.async_incr(_hits_key)
+                        
+                        # try:
+                        #     with anyio.fail_after(1):
+                        #         # logger.info(f'[{self.name}] Calling INCR on async KeyDB. Cached function: {_hits_key}')
+                        #         await self.async_incr(_hits_key)
+                        #         # await self.async_set(_hits_key, _num_hits)
+                        # except TimeoutError:
+                        #     logger.error(f'[{self.name}] Calling INCR on async KeyDB timed out. Cached function: {base}')
+                        #     self.state.cache_failed_attempts += 1
+                        
+                        # except Exception as e:
+                        #     logger.error(f'[{self.name}] Calling INCR on async KeyDB failed. Cached function: {base}: {e}')
+                        #     self.state.cache_failed_attempts += 1
                     
                     return (result, is_cache_hit) if include_cache_hit else result
 
@@ -3387,12 +3440,19 @@ class KeyDBSession:
                         except TimeoutError:
                             logger.error(f'[{self.name}] Calling DELETE on KeyDB timed out. Cached function: {base}')
                             self.state.cache_failed_attempts += 1
+                        except Exception as e:
+                            logger.error(f'[{self.name}] Calling DELETE on KeyDB failed. Cached function: {base}: {e}')
+                            self.state.cache_failed_attempts += 1
                     
                     try:
                         result = self.get(key, default = ENOVAL)
                     except TimeoutError:
                         result = ENOVAL
                         logger.error(f'[{self.name}] Calling GET on KeyDB timed out. Cached function: {base}')
+                        self.state.cache_failed_attempts += 1
+                    except Exception as e:
+                        result = ENOVAL
+                        logger.error(f'[{self.name}] Calling GET on KeyDB failed. Cached function: {base}: {e}')
                         self.state.cache_failed_attempts += 1
 
                     is_cache_hit = result is not ENOVAL
@@ -3409,6 +3469,9 @@ class KeyDBSession:
                                 self.set(key, result, ex=cache_ttl)
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on KeyDB timed out. Cached function: {base}')
+                                self.state.cache_failed_attempts += 1
+                            except Exception as e:
+                                logger.error(f'[{self.name}] Calling SET on KeyDB failed. Cached function: {base}: {e}')
                                 self.state.cache_failed_attempts += 1
                     
                     elif _invalidate_after_n_hits:
