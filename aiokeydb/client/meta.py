@@ -3774,6 +3774,7 @@ class KeyDBClientMeta(type):
         _invalidate_after_n_hits: typing.Optional[int] = None,
         _session: typing.Optional[str] = None,
         _lazy_init: typing.Optional[bool] = None,
+        _cache_timeout: typing.Optional[float] = 5.0,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -3874,6 +3875,8 @@ class KeyDBClientMeta(type):
             (default None, use default session)
         :param bool _lazy_init: lazy init session
             (default None, use default session)
+        :param float _cache_timeout: timeout of cache operations
+            (default 5.0)
         :param kwargs: additional arguments to pass to cache
         
         :return: callable decorator
@@ -3901,6 +3904,7 @@ class KeyDBClientMeta(type):
                 _exclude_request_headers = _exclude_request_headers,
                 _cache_invalidator = _cache_invalidator,
                 _invalidate_after_n_hits = _invalidate_after_n_hits,
+                _cache_timeout = _cache_timeout,
                 **kwargs
             )
 
@@ -3926,6 +3930,7 @@ class KeyDBClientMeta(type):
             _exclude_request_headers = _exclude_request_headers,
             _cache_invalidator = _cache_invalidator,
             _invalidate_after_n_hits = _invalidate_after_n_hits,
+            _cache_timeout = _cache_timeout,
             **kwargs
         )
             
@@ -3984,6 +3989,7 @@ class KeyDBClientMeta(type):
         _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
         _cache_invalidator: typing.Optional[typing.Union[bool, typing.Callable]] = None,
         _invalidate_after_n_hits: typing.Optional[int] = None,
+        _cache_timeout: typing.Optional[float] = 5.0,
         _session: typing.Optional[str] = None,
         _cache_fallback: typing.Optional[bool] = True,
         # _lazy_init: typing.Optional[bool] = None,
@@ -4030,6 +4036,7 @@ class KeyDBClientMeta(type):
                     _exclude_request_headers = _exclude_request_headers,
                     _cache_invalidator = _cache_invalidator,
                     _invalidate_after_n_hits = _invalidate_after_n_hits,
+                    _cache_timeout = _cache_timeout,
                 )(func)(*args, **kwargs)
 
             return inner_wrap
