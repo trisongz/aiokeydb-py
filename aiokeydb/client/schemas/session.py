@@ -3037,6 +3037,7 @@ class KeyDBSession:
         _exclude_request_headers: typing.Optional[typing.Union[typing.List[str], bool]] = True,
         _cache_invalidator: typing.Optional[typing.Union[bool, typing.Callable]] = None,
         _invalidate_after_n_hits: typing.Optional[int] = None,
+        _cache_timeout: typing.Optional[float] = 5.0,
         **kwargs
     ):
         """Memoizing cache decorator. Repeated calls with the same arguments
@@ -3217,7 +3218,7 @@ class KeyDBSession:
                         _hits_key = f'{key}:hits'
                         _num_hits = 0
                         with contextlib.suppress(Exception):
-                            with anyio.fail_after(1):
+                            with anyio.fail_after(_cache_timeout):
                                 _num_hits = await self.async_get(_hits_key)
                                 if _num_hits: _num_hits = int(_num_hits)
 
@@ -3239,7 +3240,7 @@ class KeyDBSession:
                             _invalidate_key = True
                             # logger.info(f'[{self.name}] Invalidating cache key: {key} after {_num_hits} hits')
                             with contextlib.suppress(Exception):
-                                with anyio.fail_after(1):
+                                with anyio.fail_after(_cache_timeout):
                                     await self.async_delete(key)
                             # try:
                             #     with anyio.fail_after(1):
@@ -3255,7 +3256,7 @@ class KeyDBSession:
                         if self.settings.debug_enabled:
                             logger.info(f'[{self.name}] Invalidating cache key: {key}')
                         with contextlib.suppress(Exception):
-                            with anyio.fail_after(1):
+                            with anyio.fail_after(_cache_timeout):
                                 await self.async_delete(key)
 
                         # try:
@@ -3272,7 +3273,7 @@ class KeyDBSession:
 
                     # result = ENOVAL
                     try:
-                        with anyio.fail_after(1):
+                        with anyio.fail_after(_cache_timeout):
                             result = await self.async_get(key, default = ENOVAL)
                     
                     except TimeoutError:
@@ -3297,7 +3298,7 @@ class KeyDBSession:
                             return (result, False) if include_cache_hit else result
                         if cache_ttl is None or cache_ttl > 0:
                             try:
-                                with anyio.fail_after(1):
+                                with anyio.fail_after(_cache_timeout):
                                     await self.async_set(key, result, ex=cache_ttl)
                             except TimeoutError:
                                 logger.error(f'[{self.name}] Calling SET on async KeyDB timed out. Cached function: {base}')
@@ -3310,7 +3311,7 @@ class KeyDBSession:
                     
                     elif _invalidate_after_n_hits:
                         with contextlib.suppress(Exception):
-                            with anyio.fail_after(1):
+                            with anyio.fail_after(_cache_timeout):
                                 await self.async_incr(_hits_key)
                         
                         # try:
