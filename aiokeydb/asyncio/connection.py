@@ -1800,6 +1800,7 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
         """Disconnects all connections in the pool."""
         self._checkpid()
         async with self._lock:
+
             resp = await asyncio.gather(
                 *(connection.disconnect() for connection in self._connections),
                 return_exceptions=True,
@@ -1807,3 +1808,25 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
             if exc and raise_exceptions:
                 raise exc
+
+    async def reset_pool(self, inuse_connections: bool = True, raise_exceptions: bool = False):
+        """
+        Resets the connection pool
+        """
+        await self.disconnect(inuse_connections = inuse_connections, raise_exceptions = raise_exceptions)
+        
+        # self.reset()
+        # Recreate the pool?
+        self = self.__class__(
+            max_connections=self.max_connections,
+            connection_class = self.connection_class,
+            auto_pubsub = self.auto_pubsub,
+            pubsub_decode_responses = self.pubsub_decode_responses,
+            auto_reset_enabled = self._auto_reset_enabled,
+            timeout = self.timeout,
+            queue_class = self.queue_class,
+            **self.connection_kwargs
+        )
+        
+
+
