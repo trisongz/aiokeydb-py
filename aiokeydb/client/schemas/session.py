@@ -326,7 +326,7 @@ class KeyDBSession:
                 del self.state.async_locks[name]
     
 
-    def close(self):
+    def close(self, close_pool: bool = False, raise_exceptions: bool = False):
         self.close_locks()
         if self.state.pubsub is not None:
             self.state.pubsub.close()
@@ -334,9 +334,11 @@ class KeyDBSession:
         
         if self.state.client is not None:
             self.state.client.close()
+            if close_pool:
+                self.state.client.connection_pool.disconnect(raise_exceptions = raise_exceptions)
             self.state.client = None
 
-    async def aclose(self):
+    async def aclose(self, close_pool: bool = False, raise_exceptions: bool = False):
         await self.async_close_locks()
         if self.state.async_pubsub is not None:
             await self.state.async_pubsub.close()
@@ -344,7 +346,16 @@ class KeyDBSession:
         
         if self.state.async_client is not None:
             await self.state.async_client.close()
+            if close_pool:
+                await self.state.async_client.connection_pool.disconnect(raise_exceptions = raise_exceptions)
             self.state.async_client = None
+        
+        if self.state.client is not None:
+            self.state.client.close()
+            if close_pool:
+                self.state.client.connection_pool.disconnect(raise_exceptions = raise_exceptions)
+            self.state.client = None
+
 
     def __enter__(self):
         return self

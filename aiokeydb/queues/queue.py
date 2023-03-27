@@ -12,6 +12,7 @@ from aiokeydb.client.serializers import SerializerType
 from aiokeydb.client.meta import KeyDBClient
 from aiokeydb.client.schemas.session import KeyDBSession
 from aiokeydb.connection import ConnectionPool, BlockingConnectionPool
+from aiokeydb.commands.core import AsyncScript
 from aiokeydb.asyncio.connection import AsyncConnectionPool, AsyncBlockingConnectionPool
 from aiokeydb.queues.errors import JobError
 from aiokeydb.queues.types import (
@@ -114,9 +115,9 @@ class TaskQueue:
         )
         self.uuid = self._stats.uuid
         self._version = None
-        self._schedule_script = None
-        self._enqueue_script = None
-        self._cleanup_script = None
+        self._schedule_script: AsyncScript = None
+        self._enqueue_script: AsyncScript = None
+        self._cleanup_script: AsyncScript = None
 
         self._before_enqueues = {}
         self._op_sem = asyncio.Semaphore(self.max_concurrency)
@@ -159,10 +160,12 @@ class TaskQueue:
             # socket_keepalive = True,
 
             max_connections = self.max_concurrency * 10,
-            pool_class = BlockingConnectionPool,
+            # pool_class = BlockingConnectionPool,
+            pool_class = ConnectionPool,
 
             amax_connections = self.max_concurrency ** 2,
-            apool_class = AsyncBlockingConnectionPool,
+            # apool_class = AsyncBlockingConnectionPool,
+            apool_class = AsyncConnectionPool,
             **self._ctx_kwargs
         )
 
