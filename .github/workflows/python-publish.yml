@@ -13,6 +13,8 @@ on:
     paths:
       # - 'setup.py'
       - 'aiokeydb/version.py'
+    branches:
+      - main
   release:
     types: [created]
 
