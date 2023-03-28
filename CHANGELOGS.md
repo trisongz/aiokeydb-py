@@ -1,5 +1,15 @@
 # aiokeydb changelogs
 
+## 0.1.30 (2023-03-28)
+  - Start of migration of library to maintain upstream compatibility
+  with `redis-py`.
+  - Usable in `aiokeydb.v2` namespace. Will complete full migration by v0.1.40
+  - Attempts to maintain backwards compatibility with `aiokeydb` v0.1.19
+  - All classes are now subclassed from `redis` and `redis.asyncio` rather than being explictly defined.
+  - Worker tasks functions are now callable via `KeyDBClient` and `KeyDBWorkerSettings` 
+  - Rework `ConnectionPool` and `AsyncConnectionPool` to handle resetting of the connection pool when the maximum number of connections are reached.
+
+
 ## 0.1.19 (2023-03-08)
   - Add utility to set ulimits when initializing the connection pool.
 

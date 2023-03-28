@@ -5,40 +5,120 @@ import typing
 import threading
 from contextlib import asynccontextmanager, suppress
 from lazyops.utils.logs import default_logger as logger
-
-from aiokeydb.client.types import KeyDBUri, lazyproperty
+# from lazyops.utils import logger
 from lazyops.utils.serialization import ObjectEncoder
-from aiokeydb.client.serializers import SerializerType
-from aiokeydb.client.meta import KeyDBClient
-from aiokeydb.client.schemas.session import KeyDBSession
-from aiokeydb.connection import ConnectionPool, BlockingConnectionPool
-from aiokeydb.commands.core import AsyncScript
-from aiokeydb.asyncio.connection import AsyncConnectionPool, AsyncBlockingConnectionPool
-from aiokeydb.queues.errors import JobError
-from aiokeydb.queues.types import (
+
+from aiokeydb.v2.types.base import BaseModel, Field, validator
+from aiokeydb.v2.types.base import KeyDBUri, lazyproperty
+from aiokeydb.v2.types.session import KeyDBSession
+
+from aiokeydb.v2.serializers import SerializerType
+from aiokeydb.v2.client import KeyDBClient
+from aiokeydb.v2.commands import AsyncScript
+
+from aiokeydb.v2.connection import (
+    ConnectionPool, 
+    BlockingConnectionPool,
+    AsyncConnectionPool,
+    AsyncBlockingConnectionPool
+)
+from aiokeydb.v2.types.jobs import (
     Job,
     JobStatus,
-    QueueStats,
     TERMINAL_STATUSES,
     UNSUCCESSFUL_TERMINAL_STATUSES,
 )
-from aiokeydb.queues.utils import (
+from aiokeydb.v2.exceptions import JobError
+from aiokeydb.v2.utils.queue import (
     millis,
     now,
     seconds,
-    uuid1,
     uuid4,
     get_default_job_key,
-    get_settings,
     ensure_coroutine_function,
+    get_hostname,
 )
 
-from lazyops.imports._aiohttpx import (
-    aiohttpx,
-    require_aiohttpx
-)
+from aiokeydb.v2.configs import settings
+from aiokeydb.v2.utils import set_ulimits, get_ulimits
 
-from aiokeydb.utils import set_ulimits, get_ulimits
+
+class QueueStats(BaseModel):
+    """
+    Holds the state for the queue
+    """
+    
+    name: str
+    prefix: typing.Optional[str] = 'queue'
+    uuid: typing.Optional[str] = Field(default_factory = uuid4)
+    started: typing.Optional[int] = Field(default_factory = now)
+    last_job: typing.Optional[int] = Field(default_factory = now)
+    complete: typing.Optional[int] = 0
+    failed: typing.Optional[int] = 0
+    aborted: typing.Optional[int] = 0
+    retried: typing.Optional[int] = 0
+    num_workers: typing.Optional[int] = 0
+    active_workers: typing.Optional[typing.List[str]] = []
+    worker_attributes: typing.Optional[typing.Dict[str, typing.Dict[str, typing.Any]]] = {}
+
+    @validator('uuid')
+    def validate_uuid(cls, v):
+        return uuid4() if v is None else v
+
+    @lazyproperty
+    def incomplete_key(self) -> str:
+        return f"{self.prefix}:{self.name}:incomplete"
+    
+    @lazyproperty
+    def queued_key(self) -> str:
+        return f"{self.prefix}:{self.name}:queued"
+    
+    @lazyproperty
+    def active_key(self) -> str:
+        return f"{self.prefix}:{self.name}:active"
+    
+    @lazyproperty
+    def scheduled_key(self) -> str:
+        return f"{self.prefix}:{self.name}:scheduled"
+    
+    @lazyproperty
+    def sweep_key(self) -> str:
+        return f"{self.prefix}:{self.name}:sweep"
+    
+    @lazyproperty
+    def stats_key(self) -> str:
+        return f"{self.prefix}:{self.name}:stats"
+    
+    @lazyproperty
+    def complete_key(self) -> str:
+        return f"{self.prefix}:{self.name}:complete"
+    
+    @lazyproperty
+    def queue_info_key(self) -> str:
+        return f"{self.prefix}:{self.name}:queue_info"
+    
+    @lazyproperty
+    def worker_token_key(self) -> str:
+        return f"{self.prefix}:{self.name}:token"
+    
+    @lazyproperty
+    def management_queue_key(self) -> str:
+        return f"{self.prefix}:{self.name}:mtg"
+    
+    @lazyproperty
+    def abort_id_prefix(self) -> str:
+        return f"{self.prefix}:{self.name}:abort"
+    
+    @lazyproperty
+    def heartbeat_key(self) -> str:
+        return f"{self.prefix}:{self.name}:heartbeat"
+    
+    def create_namespace(self, namespace: str) -> str:
+        return f"{self.prefix}:{self.name}:{namespace}"
+    
+    @lazyproperty
+    def node_name(self) -> str:
+        get_hostname()
 
 
 class TaskQueue:
@@ -76,9 +156,9 @@ class TaskQueue:
         max_concurrency: typing.Optional[int] = None,
         client_mode: typing.Optional[bool] = False,
         debug_enabled: typing.Optional[bool] = None,
-        management_url: typing.Optional[str] = None,
-        management_enabled: typing.Optional[bool] = True,
-        management_register_api_path: typing.Optional[str] = None,
+        # management_url: typing.Optional[str] = None,
+        # management_enabled: typing.Optional[bool] = True,
+        # management_register_api_path: typing.Optional[str] = None,
         uuid: typing.Optional[str] = None,
         metrics_func: typing.Optional[typing.Callable] = None,
         verbose_results: typing.Optional[bool] = False,
@@ -88,8 +168,7 @@ class TaskQueue:
         heartbeat_ttl: typing.Optional[int] = None, # 10,
         **kwargs
     ):
-    
-        self.settings = get_settings()
+        self.settings = settings
         self.prefix = prefix if prefix is not None else self.settings.worker.prefix
         self.queue_name = queue_name if queue_name is not None else self.settings.worker.queue_name
         self.serializer = serializer if serializer is not None else self.settings.worker.job_serializer.get_serializer()
@@ -99,14 +178,12 @@ class TaskQueue:
             **kwargs        
         }
 
-
         self.client_mode = client_mode
-
         self.max_concurrency = max_concurrency or self.settings.worker.max_concurrency
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
-        self.management_url = management_url if management_url is not None else self.settings.worker.management_url
-        self.management_enabled = management_enabled if management_enabled is not None else self.settings.worker.management_enabled
-        self.management_register_api_path = management_register_api_path if management_register_api_path is not None else self.settings.worker.management_register_api_path
+        # self.management_url = management_url if management_url is not None else self.settings.worker.management_url
+        # self.management_enabled = management_enabled if management_enabled is not None else self.settings.worker.management_enabled
+        # self.management_register_api_path = management_register_api_path if management_register_api_path is not None else self.settings.worker.management_register_api_path
         
         self._stats = QueueStats(
             name = self.queue_name,
@@ -186,8 +263,9 @@ class TaskQueue:
         return self.ctx.db_id
 
     def _set_silenced_functions(self):
-        from aiokeydb.queues.worker import WorkerTasks
-        self.silenced_functions = list(set(WorkerTasks.silenced_functions))
+
+        # from aiokeydb.queues.worker import WorkerTasks
+        self.silenced_functions = list(set(self.settings.worker.tasks.silenced_functions))
 
 
     def add_silenced_functions(self, *functions):
@@ -655,7 +733,7 @@ class TaskQueue:
                 f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}, kwargs={job.kwargs}"
             )
         elif self.truncate_logs:
-            job_kwargs = f"{str({k: str(v)[:self.logging_max_length] for k, v in job.kwargs.items()})[:self.logging_max_length]}..." if job.kwargs else None
+            job_kwargs = f"{str({k: str(v)[:self.logging_max_length] for k, v in job.kwargs.items()})[:self.logging_max_length]}..." if job.kwargs else ""
             self.logger(job=job, kind="enqueue").info(
                 f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}, kwargs={job_kwargs}"
             )
@@ -1343,70 +1421,70 @@ class TaskQueue:
     """
     Management Methods
     """
-    async def fetch_worker_token(self) -> str:
-        """
-        Fetches the worker token from keydb
-        """
-        token = await self.ctx.async_get(self.worker_token_key, self.settings.worker.token)
-        if token: token = self.serializer.loads(token)
-        return token
+    # async def fetch_worker_token(self) -> str:
+    #     """
+    #     Fetches the worker token from keydb
+    #     """
+    #     token = await self.ctx.async_get(self.worker_token_key, self.settings.worker.token)
+    #     if token: token = self.serializer.loads(token)
+    #     return token
 
-    async def register_queue(self):
-        """
-        Updates the Queue Key to Register Worker
-        """
-        queues: typing.List[str] = await self.ctx.async_get(self.management_queue_key, [])
-        if queues: queues = self.serializer.loads(queues)
-        if self.queue_name not in queues: 
-            queues.append(self.queue_name)
-            await self.ctx.async_set(self.management_queue_key, self.serializer.dumps(queues))
-            self.logger(kind = "startup").info(f'Registering queue "{self.queue_name}:{self.uuid}" with Management API')
-        else:
-            self.logger(kind = "startup").info(f'Queue "{self.queue_name}:{self.uuid}" already registered with Management API')
-        return {'registered': True}
+    # async def register_queue(self):
+    #     """
+    #     Updates the Queue Key to Register Worker
+    #     """
+    #     queues: typing.List[str] = await self.ctx.async_get(self.management_queue_key, [])
+    #     if queues: queues = self.serializer.loads(queues)
+    #     if self.queue_name not in queues: 
+    #         queues.append(self.queue_name)
+    #         await self.ctx.async_set(self.management_queue_key, self.serializer.dumps(queues))
+    #         self.logger(kind = "startup").info(f'Registering queue "{self.queue_name}:{self.uuid}" with Management API')
+    #     else:
+    #         self.logger(kind = "startup").info(f'Queue "{self.queue_name}:{self.uuid}" already registered with Management API')
+    #     return {'registered': True}
 
-    @require_aiohttpx()
-    async def register_worker(self):
-        """
-        Register this worker with the Management API.
-        """
-        if not self.management_enabled or not self.management_endpoint: return
-        await self.ctx.async_wait_for_ready(max_attempts = 20)
-        async with aiohttpx.Client() as client:
-            attempts = 0
-            token = await self.fetch_worker_token()
-            self.logger(kind = "startup").info(
-                f'Registering queue "{self.queue_name}:{self.uuid}" \
-                with Management API @ "{self.management_url}" \
-                with token: {token}')
+    # @require_aiohttpx()
+    # async def register_worker(self):
+    #     """
+    #     Register this worker with the Management API.
+    #     """
+    #     if not self.management_enabled or not self.management_endpoint: return
+    #     await self.ctx.async_wait_for_ready(max_attempts = 20)
+    #     async with aiohttpx.Client() as client:
+    #         attempts = 0
+    #         token = await self.fetch_worker_token()
+    #         self.logger(kind = "startup").info(
+    #             f'Registering queue "{self.queue_name}:{self.uuid}" \
+    #             with Management API @ "{self.management_url}" \
+    #             with token: {token}')
             
-            while attempts < 5:
-                try:
-                    await client.async_post(
-                        url = self.management_endpoint,
-                        timeout = 5.0, 
-                        json = {
-                            "queue_name": self.queue_name,
-                            "uuid": self.uuid,
-                            "token": token,
-                        }
-                    )
-                    self.logger(kind = "startup").info(
-                        f'Succesfully registered queue "{self.queue_name}:{self.uuid}"'
-                    )
-                    return {'registered': True}
+    #         while attempts < 5:
+    #             try:
+    #                 await client.async_post(
+    #                     url = self.management_endpoint,
+    #                     timeout = 5.0, 
+    #                     json = {
+    #                         "queue_name": self.queue_name,
+    #                         "uuid": self.uuid,
+    #                         "token": token,
+    #                     }
+    #                 )
+    #                 self.logger(kind = "startup").info(
+    #                     f'Succesfully registered queue "{self.queue_name}:{self.uuid}"'
+    #                 )
+    #                 return {'registered': True}
                 
-                except (aiohttpx.HTTPError, asyncio.TimeoutError, aiohttpx.NetworkError, aiohttpx.ConnectError):
-                    attempts += 1
-                    await asyncio.sleep(2.5)
-                    continue
+    #             except (aiohttpx.HTTPError, asyncio.TimeoutError, aiohttpx.NetworkError, aiohttpx.ConnectError):
+    #                 attempts += 1
+    #                 await asyncio.sleep(2.5)
+    #                 continue
 
-                except Exception as e:
-                    self.logger(kind = "startup").error(
-                        f'Failed to register queue "{self.queue_name}:{self.uuid}" with Management API: {e}'
-                    )
-                    return {'registered': False}
-        return {'registered': False}
+    #             except Exception as e:
+    #                 self.logger(kind = "startup").error(
+    #                     f'Failed to register queue "{self.queue_name}:{self.uuid}" with Management API: {e}'
+    #                 )
+    #                 return {'registered': False}
+    #     return {'registered': False}
 
     """
     Alias Properties
@@ -1415,15 +1493,15 @@ class TaskQueue:
     @lazyproperty
     def node_name(self) -> str: return self._stats.node_name
 
-    @lazyproperty
-    def management_endpoint(self) -> str: 
-        """
-        Returns the management endpoint
-        """
-        if self.management_url is None:
-            return None
-        from urllib.parse import urljoin
-        return urljoin(self.management_url, self.management_register_api_path)
+    # @lazyproperty
+    # def management_endpoint(self) -> str: 
+    #     """
+    #     Returns the management endpoint
+    #     """
+    #     if self.management_url is None:
+    #         return None
+    #     from urllib.parse import urljoin
+    #     return urljoin(self.management_url, self.management_register_api_path)
 
     
     # Counts
@@ -1469,6 +1547,6 @@ class TaskQueue:
 
     def create_namespace(self, key: str) -> str: return self._stats.create_namespace(key)
 
-    
+# Job.update_forward_refs(queue = TaskQueue)
 # Job.update_forward_refs()
 # Job.__try_update_forward_refs__()

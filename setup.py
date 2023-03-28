@@ -20,6 +20,8 @@ requirements = [
     'lazyops>=0.2.20',
     "pydantic",
     "anyio",
+    "croniter",
+    # "hiredis",
 ]
 
 args = {
