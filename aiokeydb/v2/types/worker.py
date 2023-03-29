@@ -605,6 +605,57 @@ class Worker:
             kwargs: additional arguments to pass to the function
         """
         return default_settings.worker.add(
-            task = task, name = name, obj = obj, verbose = verbose, **kwargs
+            task = task, 
+            name = name, 
+            obj = obj, 
+            verbose = verbose, 
+            **kwargs
         )
+    
+    @staticmethod
+    def set_queue_func(
+        queue_func: typing.Union[typing.Callable, 'TaskQueue'],
+    ):
+        """
+        Set the queue function to use for the worker queue.
+        """
+        return default_settings.worker.set_queue_func(queue_func = queue_func)
+
+    @staticmethod
+    def add_fallback_function(
+        verbose: typing.Optional[bool] = True,
+        silenced: typing.Optional[bool] = None,
+        method: typing.Optional[str] = "apply",
+        timeout: typing.Optional[int] = None,
+        suppressed_exceptions: typing.Optional[typing.List[typing.Type[Exception]]] = None,
+        failed_results: typing.Optional[typing.List] = None,
+        queue_func: typing.Optional[typing.Union[typing.Callable, 'TaskQueue']] = None,
+        **kwargs,
+    ):
+        """
+        Add a fallback function to the worker queue.
+        The function will first be attempted in the worker queue
+        and if it fails, it will be called directly.
+        This is designed to reduce redundancy in writing fallback functions.
         
+        **IMPORTANT**: The function must be a coroutine function, and
+        and should only have kwargs
+
+        >> @Worker.add_fallback_function()
+        >> async def run_func(ctx: Optional[dict] = None, **kwargs):
+        >>     if ctx:
+        >>         print("Calling from Worker Queue. Will Fail.")
+        >>         raise Exception("Failed")
+        >>     print("Calling Directly")
+        >>     return "Hello World"
+        """
+        return default_settings.worker.add_fallback_function(
+            verbose = verbose, 
+            silenced = silenced, 
+            method = method, 
+            timeout = timeout,
+            suppressed_exceptions = suppressed_exceptions, 
+            failed_results = failed_results,
+            queue_func = queue_func, 
+            **kwargs
+        )

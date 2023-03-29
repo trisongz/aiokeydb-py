@@ -2,7 +2,7 @@ import os
 import json
 import socket
 import contextlib
-
+import functools
 from lazyops.utils.helpers import is_coro_func
 from lazyops.utils.logs import default_logger as logger
 from typing import Optional, Dict, Any, Union, Callable, List, Tuple, TYPE_CHECKING
@@ -14,7 +14,7 @@ from aiokeydb.v2.utils.queue import run_in_executor
 
 if TYPE_CHECKING:
     from aiokeydb.v2.types.jobs import CronJob
-
+    from aiokeydb.v2.types.task_queue import TaskQueue
 
 
 class WorkerTasks(object):
@@ -30,6 +30,7 @@ class WorkerTasks(object):
     shutdown_funcs: Dict[str, Tuple[Union[Any, Callable], Dict]] = {}
 
     silenced_functions: List[str] = []
+    queue_func: Union[Callable, 'TaskQueue'] = None
 
 class KeyDBWorkerSettings(BaseSettings):
     """
@@ -431,6 +432,65 @@ class KeyDBWorkerSettings(BaseSettings):
         
         return decorator
     
+    def set_queue_func(
+        self,
+        queue_func: Union[Callable, 'TaskQueue'],
+    ):
+        """
+        Sets the queue function to use.
+        """
+        self.tasks.queue_func = queue_func
+    
+    def get_queue_func(
+        self,
+        queue_func: Optional[Union[Callable, 'TaskQueue']] = None,
+    ) -> 'TaskQueue':
+        """
+        Gets the queue function to use.
+        """
+        queue_func = queue_func or self.tasks.queue_func
+        return queue_func() if callable(queue_func) else queue_func
+
+    def add_fallback_function(
+        self,
+        verbose: Optional[bool] = True,
+        silenced: Optional[bool] = None,
+        method = "apply",
+        timeout: Optional[int] = None,
+        suppressed_exceptions: Optional[list] = None,
+        failed_results: Optional[list] = None,
+        queue_func: Optional[Union[Callable, 'TaskQueue']] = None,
+        **kwargs,
+    ):
+        """
+        Creates a fallback function for the worker.
+
+        - attempts to apply the function to the queue, if it fails, it will
+        attempt to run the function locally.
+        """
+        if not suppressed_exceptions: suppressed_exceptions = [Exception]
+        if timeout is None: timeout = self.job_timeout
+        def decorator(func: Callable):
+            self.tasks.functions.append(func)
+            name = func.__name__
+            if verbose: logger.info(f"Registered fallback function {name}")
+            if silenced is True: self.tasks.silenced_functions.append(name)
+
+            @functools.wraps(func)
+            async def wrapper(**kwargs):
+                with contextlib.suppress(*suppressed_exceptions):
+                    queue = self.get_queue_func(queue_func)
+                    res = await getattr(queue, method)(
+                        name, 
+                        timeout = timeout, 
+                        **kwargs
+                    )
+                    if failed_results and res in failed_results: raise ValueError(res)
+                    return res
+                return await func(**kwargs)
+            return wrapper
+        return decorator
+        
 
     def add_cronjob(        
         self,

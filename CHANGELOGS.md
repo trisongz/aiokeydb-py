@@ -1,5 +1,9 @@
 # aiokeydb changelogs
 
+## 0.1.31 (2023-03-29)
+  - Add new `add_fallback_function` method for Worker, which allows for a fallback function to be called when the worker fails to execute the task. (v2)
+
+
 ## 0.1.30 (2023-03-28)
   - Start of migration of library to maintain upstream compatibility
   with `redis-py`.
