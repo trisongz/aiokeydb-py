@@ -139,11 +139,12 @@ class KeyDBWorkerSettings(BaseSettings):
     async def run_dependencies(
         self, 
         ctx: Dict,
-        verbose: bool = False,    
+        verbose: Optional[bool] = None, 
     ) -> Dict[str, Any]:
         """
         Runs all the worker dependencies
         """
+        if verbose is None: verbose = self.debug_enabled
         for name, dep in self.tasks.dependencies.items():
             func, kwargs = dep
             if verbose: logger.info(f'[dependency] setting ctx[{name}]: result of {func.__name__}')
@@ -232,7 +233,7 @@ class KeyDBWorkerSettings(BaseSettings):
         self,
         obj: Optional[Any] = None,
         name: Optional[str] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         **kwargs,
@@ -253,6 +254,7 @@ class KeyDBWorkerSettings(BaseSettings):
         >> ctx['client'] = Client
             
         """
+        if verbose is None: verbose = self.debug_enabled
         if obj is not None:
             name = name or obj.__name__
             if callable(obj):
@@ -287,7 +289,7 @@ class KeyDBWorkerSettings(BaseSettings):
         self,
         obj: Optional[Any] = None,
         name: Optional[str] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
         **kwargs,
@@ -300,6 +302,7 @@ class KeyDBWorkerSettings(BaseSettings):
             verbose: whether to print the function's output
             kwargs: additional arguments to pass to the function
         """
+        if verbose is None: verbose = self.debug_enabled
         if obj is not None:
             name = name or obj.__name__
             self.tasks.dependencies[name] = (obj, kwargs)
@@ -328,7 +331,7 @@ class KeyDBWorkerSettings(BaseSettings):
     def on_startup(
         self,
         name: Optional[str] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
         **kwargs,
@@ -353,6 +356,7 @@ class KeyDBWorkerSettings(BaseSettings):
 
         
         """
+        if verbose is None: verbose = self.debug_enabled
         if _fx is not None:
             name = name or _fx.__name__
             self.tasks.startup_funcs[name] = (_fx, kwargs)
@@ -373,7 +377,7 @@ class KeyDBWorkerSettings(BaseSettings):
     def on_shutdown(
         self,
         name: Optional[str] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
         **kwargs,
@@ -381,6 +385,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         Add a shutdown function to the worker queue.
         """
+        if verbose is None: verbose = self.debug_enabled
         if _fx is not None:
             name = name or _fx.__name__
             self.tasks.shutdown_funcs[name] = (_fx, kwargs)
@@ -400,7 +405,7 @@ class KeyDBWorkerSettings(BaseSettings):
         self,
         name: Optional[str] = None,
         _fx: Optional[Callable] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         **kwargs,
     ):
@@ -453,7 +458,7 @@ class KeyDBWorkerSettings(BaseSettings):
 
     def add_fallback_function(
         self,
-        verbose: Optional[bool] = True,
+        verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         method = "apply",
         timeout: Optional[int] = None,
@@ -469,6 +474,7 @@ class KeyDBWorkerSettings(BaseSettings):
         attempt to run the function locally.
         """
         if not suppressed_exceptions: suppressed_exceptions = [Exception]
+        if verbose is None: verbose = self.debug_enabled
         if timeout is None: timeout = self.job_timeout
         def decorator(func: Callable):
             self.tasks.functions.append(func)
@@ -496,7 +502,7 @@ class KeyDBWorkerSettings(BaseSettings):
         self,
         schedule: Optional[Union[Dict, List, str]] = None,
         _fx: Optional[Callable] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         **kwargs,
     ):
@@ -506,6 +512,7 @@ class KeyDBWorkerSettings(BaseSettings):
             {'coroutine': refresh_spot_data, 'name': 'refresh_spot_data', 'minute': {10, 30, 50}},
         }
         """
+        if verbose is None: verbose = self.debug_enabled
         if _fx is not None:
             cron = {'function': _fx, **kwargs, 'cron': schedule, 'silenced': silenced}
             self.tasks.cronjobs.append(cron)
@@ -526,7 +533,7 @@ class KeyDBWorkerSettings(BaseSettings):
         task: TaskType = TaskType.default,
         name: Optional[str] = None,
         obj: Optional[Any] = None,
-        verbose: Optional[bool] = False,
+        verbose: Optional[bool] = None,
         **kwargs,
     ):
         """

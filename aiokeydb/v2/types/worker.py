@@ -453,7 +453,7 @@ class Worker:
     def add_context(
         obj: typing.Optional[typing.Any] = None,
         name: typing.Optional[str] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
         _fx: typing.Optional[typing.Callable] = None,
         **kwargs,
@@ -482,7 +482,7 @@ class Worker:
     def add_dependency(
         obj: typing.Optional[typing.Any] = None,
         name: typing.Optional[str] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         _fx: typing.Optional[typing.Callable] = None,
         silenced: typing.Optional[bool] = None,
         **kwargs,
@@ -503,7 +503,7 @@ class Worker:
     @staticmethod
     def on_startup(
         name: typing.Optional[str] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         _fx: typing.Optional[typing.Callable] = None,
         silenced: typing.Optional[bool] = None,
         **kwargs,
@@ -535,7 +535,7 @@ class Worker:
     @staticmethod
     def on_shutdown(
         name: typing.Optional[str] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         _fx: typing.Optional[typing.Callable] = None,
         silenced: typing.Optional[bool] = None,
         **kwargs,
@@ -551,7 +551,7 @@ class Worker:
     def add_function(
         name: typing.Optional[str] = None,
         _fx: typing.Optional[typing.Callable] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
@@ -575,7 +575,7 @@ class Worker:
     def add_cronjob(        
         schedule: typing.Optional[typing.Union[typing.Dict, typing.List, str]] = None,
         _fx: typing.Optional[typing.Callable] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
         **kwargs,
     ):
@@ -595,7 +595,7 @@ class Worker:
         task: TaskType = TaskType.default,
         name: typing.Optional[str] = None,
         obj: typing.Optional[typing.Any] = None,
-        verbose: typing.Optional[bool] = False,
+        verbose: typing.Optional[bool] = None,
         **kwargs,
     ):
         """

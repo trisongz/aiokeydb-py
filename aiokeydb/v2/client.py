@@ -150,6 +150,7 @@ class KeyDBClientMeta(type):
                 connection_class = connection_class,
                 auto_pubsub = auto_pubsub,
                 pubsub_decode_responses = pubsub_decode_responses,
+                **cls.settings.get_retry_arg(False),
                 **connection_kwargs,
                 **config
             ),
@@ -160,6 +161,7 @@ class KeyDBClientMeta(type):
                 connection_class = aconnection_class,
                 auto_pubsub = auto_pubsub,
                 pubsub_decode_responses = pubsub_decode_responses,
+                **cls.settings.get_retry_arg(True),
                 **aconnection_kwargs,
                 **config
             ),

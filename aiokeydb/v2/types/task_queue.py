@@ -28,6 +28,7 @@ from aiokeydb.v2.types.jobs import (
     TERMINAL_STATUSES,
     UNSUCCESSFUL_TERMINAL_STATUSES,
 )
+import aiokeydb.v2.exceptions as exceptions
 from aiokeydb.v2.exceptions import JobError
 from aiokeydb.v2.utils.queue import (
     millis,
@@ -41,6 +42,9 @@ from aiokeydb.v2.utils.queue import (
 
 from aiokeydb.v2.configs import settings
 from aiokeydb.v2.utils import set_ulimits, get_ulimits
+from aiokeydb.v2.backoff import default_backoff
+from redis.asyncio.retry import Retry
+
 
 
 class QueueStats(BaseModel):
@@ -221,8 +225,11 @@ class TaskQueue:
             self._ctx_kwargs['socket_keepalive'] = self.settings.worker.socket_keepalive
         if 'health_check_interval' not in self._ctx_kwargs:
             self._ctx_kwargs['health_check_interval'] = self.heartbeat_ttl
-        if 'retry_on_timeout' not in self._ctx_kwargs:
-            self._ctx_kwargs['retry_on_timeout'] = self.settings.worker.retry_on_timeout
+        # if 'retry' not in self._ctx_kwargs:
+        #     self._ctx_kwargs['retry'] = Retry(default_backoff(), retries = 3, supported_errors = (exceptions.ConnectionError, exceptions.TimeoutError, exceptions.BusyLoadingError))
+
+        # if 'retry_on_timeout' not in self._ctx_kwargs:
+        #     self._ctx_kwargs['retry_on_timeout'] = self.settings.worker.retry_on_timeout
 
         return KeyDBClient.create_session(
             name = self.queue_name,
@@ -246,11 +253,17 @@ class TaskQueue:
             **self._ctx_kwargs
         )
 
-    async def _get_stats(self, log_stats: bool = False):
+    async def _get_stats(self, log_stats: bool = False, include_jobs: bool = True, include_conn_kwargs: bool = True, include_retries: bool = False):
         _stats = await self.ctx._async_get_stats()
         _stats['version'] = self.version
         _stats['queue'] = await self.info()
-        _stats['connection_kwargs'] = self.ctx.async_client.connection_pool.connection_kwargs
+        if not include_jobs:
+            _stats['queue']['jobs'] = len(_stats['queue'].get('jobs', []))
+        if include_conn_kwargs: 
+            _stats['connection_kwargs'] = {**self.ctx.async_client.connection_pool.connection_kwargs, **self._ctx_kwargs}
+            if not include_retries:
+                _stats['connection_kwargs']['retry_on_error'] = len(_stats['connection_kwargs']['retry_on_error'])
+
         if log_stats: self.logger(kind = 'stats').info(f"{_stats}")
         return _stats
     

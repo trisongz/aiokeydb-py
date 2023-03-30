@@ -4,13 +4,16 @@ import socket
 import contextlib
 import logging
 
-from typing import Optional, Dict, Any, Union, Type, Mapping, Callable
+from typing import Optional, Dict, Any, Union, Type, Mapping, Callable, List
 from lazyops.utils.logs import default_logger as logger
 
+import aiokeydb.v2.exceptions as exceptions
 from aiokeydb.v2.types import BaseSettings, validator, root_validator, lazyproperty, KeyDBUri
 from aiokeydb.v2.serializers import SerializerType, BaseSerializer
 from aiokeydb.v2.utils import import_string
 from aiokeydb.v2.configs.worker import KeyDBWorkerSettings
+
+from aiokeydb.v2.backoff import default_backoff
 
 
 
@@ -63,8 +66,6 @@ class KeyDBSettings(BaseSettings):
     redis_connect_func: Optional[Union[str, Callable]] = None
     async_redis_connect_func: Optional[Union[str, Callable]] = None
 
-    retry_on_timeout: Optional[bool] = True
-    retry_on_error: Optional[list] = None
     
     ssl: Optional[bool] = False
     ssl_keyfile: Optional[str] = None
@@ -88,6 +89,13 @@ class KeyDBSettings(BaseSettings):
     # connection_timeout: Optional[int] = 300
     # socket_keepalive: Optional[bool] = True
     # retry_on_timeout: Optional[bool] = True
+
+    retry_on_timeout: Optional[bool] = True
+    retry_on_error: Optional[list] = None
+    retry_on_connection_error: Optional[bool] = True
+    retry_on_connection_reset_error: Optional[bool] = True
+    retry_on_response_error: Optional[bool] = True
+    retry_enabled: Optional[bool] = True
     
     single_connection_client: Optional[bool] = False
     health_check_interval: Optional[int] = 15
@@ -362,6 +370,41 @@ class KeyDBSettings(BaseSettings):
         """
         return self.worker.job_timeout
 
+    @lazyproperty
+    def _retry_exceptions(self) -> List[Type[Exception]]:
+        """
+        Returns the list of retry exceptions
+        """
+        _retries = []
+        if self.retry_on_timeout:
+            self.retry_on_timeout = False
+            _retries.extend([TimeoutError, exceptions.TimeoutError])
+        if self.retry_on_connection_error:
+            _retries.extend([ConnectionError, exceptions.ConnectionError])
+        if self.retry_on_connection_reset_error:
+            _retries.append(ConnectionResetError)
+        if self.retry_on_response_error:
+            _retries.extend([exceptions.ResponseError, exceptions.BusyLoadingError])
+        # if self.retry_on_error:
+        #     for exc in self.retry_on_error:
+        #         if isinstance(exc, str):
+        #             exc = import_string(exc)
+        #         _retries.append(exc)
+        # logger.info(f'Retry Exceptions: {_retries}')
+        return list(set(_retries))
+
+    def get_retry_arg(self, _is_async: bool = False) -> Dict[str, Any]:
+        """
+        Returns the retry argument
+        """
+        if _is_async:
+            from redis.asyncio.retry import Retry
+        else:
+            from redis.retry import Retry
+        return {
+            'retry': Retry(default_backoff(), retries = 3, supported_errors = (exceptions.ConnectionError, exceptions.TimeoutError, exceptions.BusyLoadingError)) \
+        } if self.retry_enabled else {}
+
 
     @property
     def config_args(
@@ -371,6 +414,7 @@ class KeyDBSettings(BaseSettings):
             'socket_timeout': self.socket_timeout,
             'socket_connect_timeout': self.socket_connect_timeout,
             'socket_keepalive': self.socket_keepalive,
+            'retry_on_error': self._retry_exceptions,
             'retry_on_timeout': self.retry_on_timeout,
             'health_check_interval': self.health_check_interval,
             # "unix_socket_path": self.unix_socket_path,
