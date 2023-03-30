@@ -16,7 +16,7 @@ from aiokeydb.v2.configs.worker import KeyDBWorkerSettings
 
 _default_db_mapping = {
     'default': 0,
-    'workers': 2,
+    'worker': 2,
     'cache': 5,
 }
 
@@ -121,7 +121,7 @@ class KeyDBSettings(BaseSettings):
     @lazyproperty
     def worker(self) -> KeyDBWorkerSettings:
         conf = KeyDBWorkerSettings()
-        if conf.db is None: conf.db = self.get_db_id('workers')
+        if conf.db is None: conf.db = self.get_db_id('worker')
         return conf
     
     @validator('config_kwargs', pre = True, always = True)
@@ -340,18 +340,18 @@ class KeyDBSettings(BaseSettings):
         if self.async_pool_class and _is_async:
             if isinstance(self.async_pool_class, str):
                 if 'blocking' in self.async_pool_class.lower():
-                    from _aiokeydb.connection import AsyncBlockingConnectionPool
+                    from aiokeydb.v2.connection import AsyncBlockingConnectionPool
                     return AsyncBlockingConnectionPool
-                from _aiokeydb.connection import AsyncConnectionPool
+                from aiokeydb.v2.connection import AsyncConnectionPool
                 return AsyncConnectionPool
             return self.async_pool_class
         
         elif self.pool_class and not _is_async:
             if isinstance(self.pool_class, str):
                 if 'blocking' in self.pool_class.lower():
-                    from _aiokeydb.connection import BlockingConnectionPool
+                    from aiokeydb.v2.connection import BlockingConnectionPool
                     return BlockingConnectionPool
-                from _aiokeydb.connection import ConnectionPool
+                from aiokeydb.v2.connection import ConnectionPool
                 return ConnectionPool
             return self.pool_class
         return None
@@ -403,7 +403,13 @@ class KeyDBSettings(BaseSettings):
         Configures the Connection
         """
         for key, value in kwargs.items():
-            if hasattr(self, key):
+            if key in {"cache_db_id", "worker_db_id"}:
+                map_key = key.split('_', 1)[0]
+                self.db_mapping[map_key] = value
+            elif key in {"db", "db_id"}:
+                self.db = value
+                self.db_mapping["default"] = value
+            elif hasattr(self, key):
                 setattr(self, key, value)
             elif key == "queue_db":
                 self.worker.db = value

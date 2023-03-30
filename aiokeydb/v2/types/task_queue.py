@@ -246,6 +246,12 @@ class TaskQueue:
             **self._ctx_kwargs
         )
 
+    async def _get_stats(self, log_stats: bool = False):
+        _stats = await self.ctx._async_get_stats()
+        _stats['version'] = self.version
+        _stats['queue'] = await self.info()
+        if log_stats: self.logger(kind = 'stats').info(f"{_stats}")
+        return _stats
     
     @lazyproperty
     def version(self):

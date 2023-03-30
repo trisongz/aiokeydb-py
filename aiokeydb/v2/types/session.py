@@ -3184,7 +3184,29 @@ class KeyDBSession:
     def __bool__(self) -> bool:
         return self.state.active
 
-
+    async def _async_get_stats(self) -> typing.Dict[str, typing.Any]:
+        stats = {
+            'pool': getattr(self.client.connection_pool, '_stats', {}),
+            'apool': getattr(self.async_client.connection_pool, '_stats', {}),
+        }
+        _info = await self.async_info()
+        stats['maxclients'] = _info['maxclients']
+        stats['connected_clients'] = _info['connected_clients']
+        stats['used_memory'] = _info['used_memory']
+        stats['max_connections_used'] = stats['maxclients'] / stats['connected_clients']
+        return stats
+    
+    def _get_stats(self) -> typing.Dict[str, typing.Any]:
+        stats = {
+            'pool': getattr(self.client.connection_pool, '_stats', {}),
+            'apool': getattr(self.async_client.connection_pool, '_stats', {}),
+        }
+        _info = self.info()
+        stats['maxclients'] = _info['maxclients']
+        stats['connected_clients'] = _info['connected_clients']
+        stats['used_memory'] = _info['used_memory']
+        stats['max_connections_used'] = stats['maxclients'] / stats['connected_clients']
+        return stats
 
 
 def build_cachify_func(

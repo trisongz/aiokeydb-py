@@ -320,6 +320,16 @@ class ConnectionPool(_ConnectionPool):
         """
         self.disconnect(inuse_connections = inuse_connections, raise_exceptions = raise_exceptions, with_lock = False)
         self.reset()
+    
+    @property
+    def _stats(self):
+        return {
+            "pid": self.pid,
+            "created_connections": self._created_connections,
+            "available_connections": len(self._available_connections),
+            "in_use_connections": len(self._in_use_connections),
+            "max_connections": self.max_connections,
+        }
 
 _ACP = typing.TypeVar("_ACP", bound="AsyncConnectionPool")
 
@@ -557,6 +567,18 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         #     await self.release(conn)
         self.reset()
 
+
+    @property
+    def _stats(self):
+        return {
+            "pid": self.pid,
+            "created_connections": self._created_connections,
+            "available_connections": len(self._available_connections),
+            "in_use_connections": len(self._in_use_connections),
+            "max_connections": self.max_connections,
+        }
+    
+
 ## Blocking Pools
 
 class BlockingConnectionPool(ConnectionPool):
@@ -726,6 +748,15 @@ class BlockingConnectionPool(ConnectionPool):
         for connection in self._connections:
             connection.disconnect()
 
+
+    @property
+    def _stats(self):
+        return {
+            "pid": self.pid,
+            "available_connections": self.pool.qsize(),
+            "in_use_connections": len(self._connections),
+            "max_connections": self.max_connections,
+        }
 
 class AsyncBlockingConnectionPool(AsyncConnectionPool):
     """
@@ -907,3 +938,12 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             exc = next((r for r in resp if isinstance(r, BaseException)), None)
             if exc:
                 raise exc
+
+    @property
+    def _stats(self):
+        return {
+            "pid": self.pid,
+            "available_connections": self.pool.qsize(),
+            "in_use_connections": len(self._connections),
+            "max_connections": self.max_connections,
+        }

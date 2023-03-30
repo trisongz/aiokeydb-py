@@ -487,7 +487,7 @@ class KeyDBWorkerSettings(BaseSettings):
                     )
                     if failed_results and res in failed_results: raise ValueError(res)
                     return res
-                return await func(**kwargs)
+                return await func(ctx = None, **kwargs)
             return wrapper
         return decorator
         
