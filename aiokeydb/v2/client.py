@@ -108,12 +108,14 @@ class KeyDBClientMeta(type):
         uri: KeyDBUri,
         
         max_connections: int = None,
-        pool_class: typing.Type[ConnectionPool] = BlockingConnectionPool,
+        # pool_class: typing.Type[ConnectionPool] = BlockingConnectionPool,
+        pool_class: typing.Type[ConnectionPool] = ConnectionPool,
         connection_class: typing.Type[Connection] = Connection,
         connection_kwargs: typing.Dict[str, typing.Any] = None,
 
         amax_connections: int = None,
-        apool_class: typing.Type[AsyncConnectionPool] = AsyncBlockingConnectionPool,
+        # apool_class: typing.Type[AsyncConnectionPool] = AsyncBlockingConnectionPool,
+        apool_class: typing.Type[AsyncConnectionPool] = AsyncConnectionPool,
         aconnection_class: typing.Type[AsyncConnection] = AsyncConnection,
         aconnection_kwargs: typing.Dict[str, typing.Any] = None,
 
@@ -4041,7 +4043,7 @@ class KeyDBClientMeta(type):
         # add _lazy_init to prevent loading the session
         # before the class is fully initialized
         if _lazy_init is True:
-            return cls.cachify_v2(
+            return cls.cachify(
                 cache_ttl = cache_ttl,
                 typed = typed,
                 cache_prefix = cache_prefix,

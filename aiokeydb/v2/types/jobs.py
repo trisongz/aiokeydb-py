@@ -13,8 +13,8 @@ from aiokeydb.v2.utils.queue import (
 from aiokeydb.v2.configs import settings
 from aiokeydb.v2.types.static import JobStatus, TaskType, TERMINAL_STATUSES, UNSUCCESSFUL_TERMINAL_STATUSES
 
-# if typing.TYPE_CHECKING:
-#     from aiokeydb.v2.types.task_queue import TaskQueue
+if typing.TYPE_CHECKING:
+    from aiokeydb.v2.types.task_queue import TaskQueue
 
 
 

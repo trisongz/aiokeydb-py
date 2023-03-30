@@ -250,6 +250,7 @@ class TaskQueue:
         _stats = await self.ctx._async_get_stats()
         _stats['version'] = self.version
         _stats['queue'] = await self.info()
+        _stats['connection_kwargs'] = self.ctx.async_client.connection_pool.connection_kwargs
         if log_stats: self.logger(kind = 'stats').info(f"{_stats}")
         return _stats
     
@@ -355,6 +356,7 @@ class TaskQueue:
                 logger.debug(f'New Max Connections: {new_set_max_connections}')
             except Exception as e:
                 logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
+        # logger.info(f'Pool Class: {self.ctx.client_pools.apool.__class__.__name__}')
 
 
     """

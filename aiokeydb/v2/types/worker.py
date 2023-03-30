@@ -124,12 +124,16 @@ class Worker:
         for job in self.cron_jobs:
             if not croniter.is_valid(job.cron):
                 raise ValueError(f"Cron is invalid {job.cron}")
-            functions.add(job.function)
+            # functions.add(job.function)
+            self.functions[job.function.__qualname__] = job.function
+            # self.logger(kind="startup").info(f"Added cron job {job.function.__qualname__} with cron {job.cron} to worker {self.name}.")
 
         for function in functions:
             if isinstance(function, tuple): name, function = function
+            # elif isinstance(function, Job):
             else: name = function.__qualname__
             self.functions[name] = function
+        # self.logger(kind="startup").info(f"Added {len(self.functions)} functions to worker {self.name}: {self.functions.keys()}")
     
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
@@ -343,12 +347,12 @@ class Worker:
             job.attempts += 1
             await job.update()
             context = {**self.context, "job": job}
+            # self.logger(job = None, kind = "process").error(f"JOB: {job}")
             await self._before_process(context)
             if job.function not in self.silenced_functions:
                 self.logger(job = job, kind = "process").info(
                     f"← duration={job.duration('running')}ms, node={self.node_name}, func={job.function}"
                 )
-                
 
             function = ensure_coroutine_function(self.functions[job.function])
             task = asyncio.create_task(function(context, **(job.kwargs or {})))
