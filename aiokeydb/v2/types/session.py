@@ -2540,6 +2540,105 @@ class KeyDBSession:
         """
         return await self.async_client.zinter(name, keys, aggregate, **kwargs)
     
+    def lmove(
+        self,
+        source_list: str,
+        destination_list: str,
+        source: typing.Optional[str] = 'LEFT',
+        destination: typing.Optional[str] = 'RIGHT',
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it
+        """
+        return self.client.lmove(source_list, destination_list, source, destination, **kwargs)
+
+    async def async_lmove(
+        self,
+        source_list: str,
+        destination_list: str,
+        source: typing.Optional[str] = 'LEFT',
+        destination: typing.Optional[str] = 'RIGHT',
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it
+        """
+        return await self.async_client.lmove(source_list, destination_list, source, destination, **kwargs)
+
+
+    def blmove(
+        self,
+        source_list: str,
+        destination_list: str,
+        source: typing.Optional[str] = 'LEFT',
+        destination: typing.Optional[str] = 'RIGHT',
+        timeout: int = 0,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it; or block until one is available
+        """
+        return self.client.blmove(source_list, destination_list, timeout, source, destination, **kwargs)
+
+    async def async_blmove(
+        self,
+        source_list: str,
+        destination_list: str,
+        source: typing.Optional[str] = 'LEFT',
+        destination: typing.Optional[str] = 'RIGHT',
+        timeout: int = 0,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it; or block until one is available
+        """
+        return await self.async_client.blmove(source_list, destination_list, timeout, source, destination, **kwargs)
+
+    def brpoplpush(
+        self,
+        source: str,
+        destination: str,
+        timeout: int = 0,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it; or block until one is available
+        """
+        return self.client.brpoplpush(source, destination, timeout, **kwargs)
+    
+    async def async_brpoplpush(
+        self,
+        source: str,
+        destination: str,
+        timeout: int = 0,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Pop a value from a list, push it to another list and return it; or block until one is available
+        """
+        return await self.async_client.brpoplpush(source, destination, timeout, **kwargs)
+    
+    def execute_command(
+        self,
+        *args,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Execute a command
+        """
+        return self.client.execute_command(*args, **kwargs)
+    
+    async def async_execute_command(
+        self,
+        *args,
+        **kwargs
+    ) -> typing.Any:
+        """
+        Execute a command
+        """
+        return await self.async_client.execute_command(*args, **kwargs)
+
 
     """
     Other utilities

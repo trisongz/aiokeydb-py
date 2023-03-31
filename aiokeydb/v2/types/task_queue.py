@@ -326,6 +326,22 @@ class TaskQueue:
         for cb in self._before_enqueues.values():
             await cb(job)
 
+    @asynccontextmanager
+    async def pipeline(self, transaction: bool = True, shard_hint: typing.Optional[str] = None, raise_on_error: typing.Optional[bool] = None):
+        """
+        Context manager to run a pipeline.
+
+        This context manager is a wrapper around the redis pipeline context manager to ensure that it is
+        properly deleted.
+        """
+        yield self.ctx.async_pipeline
+        # pipe = self.ctx.async_client.pipeline(transaction = transaction, shard_hint = shard_hint)
+        # pipe = self.ctx.async_pipeline
+        # yield pipe
+        # await pipe.execute(raise_on_error = raise_on_error)
+        # await pipe.close(close_connection_pool = False)
+        # del pipe
+
     def serialize(self, job: Job):
         return self.serializer.dumps(job.to_dict())
 
@@ -346,6 +362,7 @@ class TaskQueue:
         Prepares the keydb server to ensure that the maximum number of concurrent
         connections are available.
         """
+        self.ctx.config['transaction'] = True
         info = await self.ctx.async_info()
         await self.prepare_for_broadcast()
 
@@ -380,7 +397,7 @@ class TaskQueue:
     Primary APIs
     """
 
-    async def schedule(self, lock: int = 1):
+    async def schedule(self, lock: int = 1, worker_id: typing.Optional[str] = None):
         if not self._schedule_script:
             self._schedule_script = self.ctx.async_client.register_script(
                 """
@@ -403,12 +420,17 @@ class TaskQueue:
                 """
             )
 
+        scheduled_key = self.scheduled_key if worker_id is None else f"{self.scheduled_key}:{worker_id}"
+        incomplete_key = self.incomplete_key if worker_id is None else f"{self.incomplete_key}:{worker_id}"
+        queued_key = self.queued_key if worker_id is None else f"{self.queued_key}:{worker_id}"
+
         return await self._schedule_script(
-            keys=[self.scheduled_key, self.incomplete_key, self.queued_key],
+            keys=[scheduled_key, incomplete_key, queued_key],
             args=[lock, seconds(now())],
         )
 
-    async def sweep(self, lock: int = 60):
+    async def sweep(self, lock: int = 60, worker_id: typing.Optional[str] = None):
+        # sourcery skip: low-code-quality
         if not self._cleanup_script:
             self._cleanup_script = self.ctx.async_client.register_script(
                 """
@@ -419,8 +441,13 @@ class TaskQueue:
                 """
             )
 
+        active_key = self.active_key if worker_id is None else f"{self.active_key}:{worker_id}"
+        sweep_key = self.sweep_key if worker_id is None else f"{self.sweep_key}:{worker_id}"
+        incomplete_key = self.incomplete_key if worker_id is None else f"{self.incomplete_key}:{worker_id}"
+
         job_ids = await self._cleanup_script(
-            keys = [self.sweep_key, self.active_key], 
+            # keys = [self.sweep_key, self.active_key] if worker_id is None else [self.sweep_key, f"{self.active_key}:{worker_id}"],
+            keys = [sweep_key, active_key],
             args = [lock], 
             client = self.ctx.async_client,
         )
@@ -431,12 +458,18 @@ class TaskQueue:
                 job = self.deserialize(job_bytes)
                 if not job: 
                     swept.append(job_id)
+                    # async with self.pipeline(transaction = True) as pipe:
                     async with self.ctx.async_client.pipeline(transaction = True) as pipe:
                         await (
-                            pipe.lrem(self.active_key, 0, job_id)
-                            .zrem(self.incomplete_key, job_id)
+                            pipe.lrem(active_key, 0, job_id)
+                            .zrem(incomplete_key, job_id)
                             .execute()
                         )
+                        # await (
+                        #     pipe.lrem(self.active_key, 0, job_id)
+                        #     .zrem(self.incomplete_key, job_id)
+                        #     .execute()
+                        # )
                     self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
                 elif job.status != JobStatus.ACTIVE or job.stuck:
                     swept.append(job_id)
@@ -520,6 +553,7 @@ class TaskQueue:
         """
         async with self._op_sem:
             async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+            # async with self.pipeline(transaction = True) as pipe:
                 dequeued, *_ = await (
                     pipe.lrem(job.queued_key, 0, job.id)
                     .zrem(job.incomplete_key, job.id)
@@ -548,7 +582,7 @@ class TaskQueue:
         job.touched = now()
         next_retry_delay = job.next_retry_delay()
 
-
+        # async with self.pipeline(transaction = True) as pipe:
         async with self.ctx.async_client.pipeline(transaction=True) as pipe:
             pipe = pipe.lrem(job.active_key, 1, job_id)
             pipe = pipe.lrem(job.queued_key, 1, job_id)
@@ -585,6 +619,7 @@ class TaskQueue:
             job.progress = 1.0
 
         async with self.ctx.async_client.pipeline(transaction=True) as pipe:
+        # async with self.pipeline(transaction = True) as pipe:
             pipe = pipe.lrem(job.active_key, 1, job_id).zrem(job.incomplete_key, job_id)
             if job.ttl > 0:
                 pipe = pipe.setex(job_id, job.ttl, self.serialize(job))
@@ -631,16 +666,24 @@ class TaskQueue:
         if postfix:
             queued_key = f'{self.queued_key}:{postfix}'
             active_key = f'{self.active_key}:{postfix}'
+            # if not timeout: timeout = 10
+            # logger.info(f'BLMOVE: {queued_key} -> {active_key}')
         if self.version < (6, 2, 0):
-            return await self.ctx.async_client.brpoplpush(
+            return await self.ctx.async_brpoplpush(
                 queued_key, 
                 active_key, 
                 timeout
             )
-        # logger.info(f'BLMOVE: {queued_key}')
-        return await self.ctx.async_client.execute_command(
-            "BLMOVE", queued_key, active_key, "RIGHT", "LEFT", timeout
+        return await self.ctx.async_blmove(
+            source_list = queued_key, 
+            destination_list = active_key, 
+            source = "RIGHT", 
+            destination = "LEFT", 
+            timeout = timeout
         )
+        # return await self.ctx.async_client.execute_command(
+        #     "BLMOVE", queued_key, active_key, "RIGHT", "LEFT", timeout
+        # )
 
     async def dequeue(self, timeout = 0, worker_id: str = None, worker_name: str = None):
         job_id = await self._dequeue_job_id(timeout) if \
@@ -656,7 +699,7 @@ class TaskQueue:
             # logger.info(f'Fetched job id {job_id}: {queued_key}: {active_key}')
             return await self._get_job_by_id(job_id)
 
-        self.logger(kind="dequeue").info("Dequeue timed out")
+        if not worker_id and not worker_name: self.logger(kind="dequeue").info("Dequeue timed out")
         return None
     
     
@@ -1352,6 +1395,7 @@ class TaskQueue:
     async def stats(self, ttl: int = 60):
         stats = await self.prepare_worker_metrics()
         current = now()
+        # async with self.pipeline(transaction = True) as pipe:
         async with self.ctx.async_client.pipeline(transaction = True) as pipe:
             key = self.create_namespace(f"stats:{self.uuid}")
             await (
@@ -1363,7 +1407,6 @@ class TaskQueue:
             )
         return stats
     
-
     async def add_heartbeat(
         self, 
         worker_id: str, 
@@ -1377,6 +1420,7 @@ class TaskQueue:
         worker_attributes = worker_attributes or {}
         heartbeat_ttl = heartbeat_ttl or self.heartbeat_ttl
         async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+        # async with self.pipeline(transaction = True) as pipe:
             key = self.create_namespace(f"worker:attr:{worker_id}")
             await (
                 pipe.setex(key, heartbeat_ttl, json.dumps(worker_attributes))
@@ -1411,8 +1455,10 @@ class TaskQueue:
         """
         current = now()
         ttl = ttl or self.heartbeat_ttl
-        self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
-        self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(ttl)))]
+        # self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
+        self.num_workers = await self.ctx.async_zcount(self.heartbeat_key, 1, "-inf")
+        # self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(ttl)))]
+        self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_zrange(self.heartbeat_key, 0, current + millis(ttl)))]
         worker_data = await self.ctx.async_mget(
             self.create_namespace(f"worker:attr:{worker_id}") for worker_id in self.active_workers
         )

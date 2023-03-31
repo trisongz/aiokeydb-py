@@ -211,6 +211,9 @@ class Worker:
             self.tasks.update(await self.upkeep())
             for _ in range(self.concurrency):
                 self._process()
+            
+            for _ in range(3):
+                self._broadcast_process()
 
             await self.event.wait()
         finally:
@@ -265,13 +268,13 @@ class Worker:
     async def upkeep(self):
         """Start various upkeep tasks async."""
 
-        async def poll(func, sleep, arg=None):
+        async def poll(func, sleep, arg=None, **kwargs):
             while not self.event.is_set():
                 try:
                     if asyncio.iscoroutinefunction(func):
-                        await func(arg or sleep)
+                        await func(arg or sleep, **kwargs)
                     else:
-                        func(arg or sleep)
+                        func(arg or sleep, **kwargs)
                 except (Exception, asyncio.CancelledError):
                     if self.event.is_set():
                         return
@@ -289,8 +292,10 @@ class Worker:
             asyncio.create_task(
                 poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
             ),
-            asyncio.create_task(poll(self._broadcast_process, self.timers["broadcast"])
-            )
+            # asyncio.create_task(
+            #     poll(self._broadcast_process, self.timers["broadcast"])
+            # ),
+
         ]
 
     async def abort(self, abort_threshold: int):
@@ -376,6 +381,16 @@ class Worker:
                 except (Exception, asyncio.CancelledError): 
                     get_and_log_exc()
 
+    async def process_broadcast(self):
+        await self.process(broadcast = True)
+
+        await self.queue.schedule(lock = 1, worker_id = self.worker_id)
+        await self.queue.schedule(lock = 1, worker_id = self.name)
+
+        await self.queue.sweep(worker_id = self.worker_id)
+        await self.queue.sweep(worker_id = self.name)
+
+
     def _process(self, previous_task=None):
         if previous_task:
             self.tasks.discard(previous_task)
@@ -390,7 +405,7 @@ class Worker:
             self.tasks.discard(previous_task)
 
         if not self.event.is_set():
-            new_task = asyncio.create_task(self.process(broadcast=True))
+            new_task = asyncio.create_task(self.process_broadcast())
             self.tasks.add(new_task)
             new_task.add_done_callback(self._broadcast_process)
         
