@@ -256,6 +256,10 @@ class TaskQueue:
     async def _get_stats(self, log_stats: bool = False, include_jobs: bool = True, include_conn_kwargs: bool = True, include_retries: bool = False):
         _stats = await self.ctx._async_get_stats()
         _stats['version'] = self.version
+        _stats['workers'] = {
+            'num': self.num_workers,
+            'active': self.active_workers,
+        }
         _stats['queue'] = await self.info()
         if not include_jobs:
             _stats['queue']['jobs'] = len(_stats['queue'].get('jobs', []))
