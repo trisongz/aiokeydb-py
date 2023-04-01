@@ -289,9 +289,9 @@ class Worker:
             asyncio.create_task(
                 poll(self.queue.stats, self.timers["stats"], self.timers["stats"] + 1)
             ),
-            asyncio.create_task(
-                poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
-            ),
+            # asyncio.create_task(
+            #     poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
+            # ),
             # asyncio.create_task(
             #     poll(self._broadcast_process, self.timers["broadcast"])
             # ),
@@ -382,6 +382,7 @@ class Worker:
                     get_and_log_exc()
 
     async def process_broadcast(self):
+        await self.heartbeat(self.heartbeat_ttl)
         await self.process(broadcast = True)
 
         await self.queue.schedule(lock = 1, worker_id = self.worker_id)

@@ -252,7 +252,7 @@ class ConnectionPool(_ConnectionPool):
             try:
                 if connection.can_read():
                     raise ConnectionError("Connection has data")
-            except (ConnectionError, OSError) as exc:
+            except (exceptions.ConnectionError, ConnectionError, OSError) as exc:
                 connection.disconnect()
                 connection.connect()
                 if connection.can_read():
@@ -411,7 +411,7 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         try:
             set_ulimits(max_connections)
         except Exception as e:
-            logger.warning(f"Unable to set ulimits for connection: {e}")
+            logger.debug(f"Unable to set ulimits for connection: {e}")
         self.connection_class: typing.Type[AsyncConnection] = connection_class
         self.connection_kwargs: typing.Dict[str, typing.Any] = connection_kwargs or {}
         self.max_connections = max_connections

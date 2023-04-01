@@ -389,7 +389,8 @@ class TaskQueue:
                 new_set_max_connections = info['maxclients']
                 logger.debug(f'New Max Connections: {new_set_max_connections}')
             except Exception as e:
-                logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
+                if self.debug_enabled:
+                    logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
         # logger.info(f'Pool Class: {self.ctx.client_pools.apool.__class__.__name__}')
 
 

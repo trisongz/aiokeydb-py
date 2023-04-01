@@ -3336,6 +3336,8 @@ def build_cachify_func(
     Builds a cachify function
     """
 
+    from lazyops.utils.helpers import fail_after
+
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
         # Get the cache key to invalidate
@@ -3431,18 +3433,21 @@ def build_cachify_func(
             _hits_key = f'{key}:hits'
             _num_hits = 0
             with contextlib.suppress(TimeoutError):
-                _num_hits = session.get(_hits_key)
+                with fail_after(_cache_timeout):
+                    _num_hits = session.get(_hits_key)
                 if _num_hits: _num_hits = int(_num_hits)
             if _num_hits and _num_hits > _invalidate_after_n_hits:
                 _invalidate_key = True
                 with contextlib.suppress(TimeoutError):
-                    session.delete(_hits_key)
+                    with fail_after(_cache_timeout):
+                        session.delete(_hits_key)
 
         if _invalidate_key:
             if session.settings.debug_enabled:
                 logger.info(f'[{session.name}] Invalidating cache key: {key}')
             try:
-                session.delete(key)
+                with fail_after(_cache_timeout):
+                    session.delete(key)
             except TimeoutError:
                 logger.error(f'[{session.name}] Calling DELETE on KeyDB timed out. Cached function: {base}')
                 session.state.cache_failed_attempts += 1
@@ -3451,7 +3456,8 @@ def build_cachify_func(
                 session.state.cache_failed_attempts += 1
         
         try:
-            result = session.get(key, default = ENOVAL)
+            with fail_after(_cache_timeout):
+                result = session.get(key, default = ENOVAL)
         except TimeoutError:
             result = ENOVAL
             logger.error(f'[{session.name}] Calling GET on KeyDB timed out. Cached function: {base}')
@@ -3472,7 +3478,8 @@ def build_cachify_func(
                 return (result, False) if include_cache_hit else result
             if cache_ttl is None or cache_ttl > 0:
                 try:
-                    session.set(key, result, ex=cache_ttl)
+                    with fail_after(_cache_timeout):
+                        session.set(key, result, ex=cache_ttl)
                 except TimeoutError:
                     logger.error(f'[{session.name}] Calling SET on KeyDB timed out. Cached function: {base}')
                     session.state.cache_failed_attempts += 1
@@ -3482,7 +3489,8 @@ def build_cachify_func(
         
         elif _invalidate_after_n_hits:
             with contextlib.suppress(TimeoutError):
-                session.incr(_hits_key, 1)
+                with fail_after(_cache_timeout):
+                    session.incr(_hits_key, 1)
         
         return (result, is_cache_hit) if include_cache_hit else result
 

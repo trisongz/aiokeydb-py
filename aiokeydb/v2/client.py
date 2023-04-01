@@ -3,9 +3,13 @@ from __future__ import annotations
 """
 KeyDB Metaclass
 """
+import anyio
 import asyncio
 import typing
 import logging
+import contextlib
+import functools
+
 from aiokeydb.v2.lock import Lock, AsyncLock
 from aiokeydb.v2.connection import (
     Encoder, 
@@ -3866,47 +3870,81 @@ class KeyDBClientMeta(type):
         
         :return: callable decorator
         """
-        import contextlib
-        from lazyops.utils import timed_cache
+        from lazyops.utils import timed_cache, is_coro_func, fail_after
+        _ = kwargs.pop('_lazy_init', None)
+        _kwargs = dict(
+            cache_ttl = cache_ttl,
+            typed = typed,
+            cache_prefix = cache_prefix,
+            exclude = exclude,
+            exclude_null = exclude_null,
+            exclude_return_types = exclude_return_types,
+            exclude_return_objs = exclude_return_objs,
+            exclude_kwargs = exclude_kwargs,
+            include_cache_hit = include_cache_hit,
+            invalidate_cache_key = invalidate_cache_key,
+            _no_cache = _no_cache,
+            _no_cache_kwargs = _no_cache_kwargs,
+            _no_cache_validator = _no_cache_validator,
+            _func_name = _func_name,
+            _validate_requests = _validate_requests,
+            _exclude_request_headers = _exclude_request_headers,
+            _cache_invalidator = _cache_invalidator,
+            _invalidate_after_n_hits = _invalidate_after_n_hits,
+            _cache_timeout = _cache_timeout,
+        )
 
-        _sess_ctx: 'KeyDBSession' = None
-        def _get_sess_ctx():
-            nonlocal _sess_ctx
-            if _sess_ctx: return _sess_ctx
-            with contextlib.suppress(Exception):
-                _sess = cls.get_session(_session)
-                if _sess.ping(): _sess_ctx = _sess
-            return _sess_ctx
-        
         def wrapper_func(func):
-            def inner_wrap(*args, **kwargs):
-                sess_ctx = _get_sess_ctx()
-                if sess_ctx is None: 
-                    if _cache_fallback is True: 
-                        with contextlib.suppress(Exception):
-                            return timed_cache(secs = cache_ttl)(func)(*args, **kwargs)
-                    return func(*args, **kwargs)
-                return sess_ctx.cachify(
-                    cache_ttl = cache_ttl,
-                    typed = typed,
-                    cache_prefix = cache_prefix,
-                    exclude = exclude,
-                    exclude_null = exclude_null,
-                    exclude_return_types = exclude_return_types,
-                    exclude_return_objs = exclude_return_objs,
-                    exclude_kwargs = exclude_kwargs,
-                    include_cache_hit = include_cache_hit,
-                    invalidate_cache_key = invalidate_cache_key,
-                    _no_cache = _no_cache,
-                    _no_cache_kwargs = _no_cache_kwargs,
-                    _no_cache_validator = _no_cache_validator,
-                    _func_name = _func_name,
-                    _validate_requests = _validate_requests,
-                    _exclude_request_headers = _exclude_request_headers,
-                    _cache_invalidator = _cache_invalidator,
-                    _invalidate_after_n_hits = _invalidate_after_n_hits,
-                    _cache_timeout = _cache_timeout,
-                )(func)(*args, **kwargs)
+
+            _sess_ctx: 'KeyDBSession' = None
+            if is_coro_func(func):
+                # logger.info(f'Async Function: {func}')
+                async def _get_sess_ctx():
+                    nonlocal _sess_ctx
+                    if _sess_ctx: return _sess_ctx
+                    _sess = cls.get_session(_session)
+                    with contextlib.suppress(Exception):
+                        async with anyio.fail_after(1.0):
+                            if await _sess.async_ping(): _sess_ctx = _sess
+                    
+                    return _sess_ctx
+                
+
+                @functools.wraps(func)
+                async def inner_wrap(*args, **kwargs):
+                    sess_ctx = await _get_sess_ctx()
+                    if sess_ctx is None: 
+                        if _cache_fallback is True: 
+                            with contextlib.suppress(Exception):
+                                return await timed_cache(secs = cache_ttl)(func)(*args, **kwargs)
+                        return await func(*args, **kwargs)
+                
+                    # logger.info(f'Using async session {sess_ctx.uri} for cache')
+                    return await sess_ctx.cachify(**_kwargs)(func)(*args, **kwargs)
+
+            else:
+                def _get_sess_ctx():
+                    nonlocal _sess_ctx
+                    if _sess_ctx: return _sess_ctx
+                    _sess = cls.get_session(_session)
+                    with contextlib.suppress(Exception):
+                        with fail_after(1.0):
+                            if _sess.ping(): _sess_ctx = _sess
+                    
+                    return _sess_ctx
+                
+                # logger.info(f'Sync Function: {func}')
+                @functools.wraps(func)
+                def inner_wrap(*args, **kwargs):
+                    sess_ctx = _get_sess_ctx()
+                    if sess_ctx is None: 
+                        if _cache_fallback is True: 
+                            with contextlib.suppress(Exception):
+                                return timed_cache(secs = cache_ttl)(func)(*args, **kwargs)
+                        return func(*args, **kwargs)
+                    
+                    # logger.info(f'Using session {sess_ctx.uri} for cache')
+                    return sess_ctx.cachify(**_kwargs)(func)(*args, **kwargs)
 
             return inner_wrap
         return wrapper_func
