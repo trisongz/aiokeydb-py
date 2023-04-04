@@ -7,6 +7,7 @@ import asyncio
 import functools
 import contextlib
 from pydantic import BaseModel
+from pydantic.types import ByteSize
 from aiokeydb.v2.typing import Number, KeyT, ExpiryT, AbsExpiryT
 from aiokeydb.v2.lock import Lock, AsyncLock
 from aiokeydb.v2.core import KeyDB, PubSub, Pipeline
@@ -3289,10 +3290,25 @@ class KeyDBSession:
             'apool': getattr(self.async_client.connection_pool, '_stats', {}),
         }
         _info = await self.async_info()
-        stats['maxclients'] = _info['maxclients']
-        stats['connected_clients'] = _info['connected_clients']
-        stats['used_memory'] = _info['used_memory']
-        stats['max_connections_used'] = stats['maxclients'] / stats['connected_clients']
+        for key in {
+            'maxclients',
+            'connected_clients',
+            'used_memory',
+            'used_memory_human',
+            'used_memory_peak_human',
+            'used_memory_peak_perc',
+            'maxmemory',
+            'maxmemory_human',
+            'maxmemory_policy',
+            'total_system_memory',
+            'total_system_memory_human',
+            'instantaneous_input_kbps',
+            'instantaneous_output_kbps',
+        }:
+            if key in _info: stats[key] = _info[key]
+
+        stats['available_connections'] = stats['maxclients'] - stats['connected_clients']
+        stats['max_connections_used'] = (stats['connected_clients'] / stats['maxclients']) * 100.0
         return stats
     
     def _get_stats(self) -> typing.Dict[str, typing.Any]:
@@ -3301,10 +3317,25 @@ class KeyDBSession:
             'apool': getattr(self.async_client.connection_pool, '_stats', {}),
         }
         _info = self.info()
-        stats['maxclients'] = _info['maxclients']
-        stats['connected_clients'] = _info['connected_clients']
-        stats['used_memory'] = _info['used_memory']
-        stats['max_connections_used'] = stats['maxclients'] / stats['connected_clients']
+        for key in {
+            'maxclients',
+            'connected_clients',
+            'used_memory',
+            'used_memory_human',
+            'used_memory_peak_human',
+            'used_memory_peak_perc',
+            'maxmemory',
+            'maxmemory_human',
+            'maxmemory_policy',
+            'total_system_memory',
+            'total_system_memory_human',
+            'instantaneous_input_kbps',
+            'instantaneous_output_kbps',
+        }:
+            if key in _info: stats[key] = _info[key]
+
+        stats['available_connections'] = stats['maxclients'] - stats['connected_clients']
+        stats['max_connections_used'] = (stats['connected_clients'] / stats['maxclients']) * 100.0
         return stats
 
 

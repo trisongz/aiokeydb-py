@@ -125,6 +125,11 @@ class KeyDBSettings(BaseSettings):
     @lazyproperty
     def app_version(self):
         return os.getenv('APP_VERSION', 'N/A')
+    
+    @property
+    def version(self):
+        from aiokeydb.version import VERSION
+        return VERSION
 
     @lazyproperty
     def worker(self) -> KeyDBWorkerSettings:

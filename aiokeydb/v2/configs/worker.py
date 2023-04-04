@@ -59,6 +59,7 @@ class KeyDBWorkerSettings(BaseSettings):
     job_timeout: Optional[int] = 120 # Controls the default job timeout
     concurrency: Optional[int] = 100
     max_concurrency: Optional[int] = 100
+    max_broadcast_concurrency: Optional[int] = 5
     threadpool_size: Optional[int] = 100
     debug_enabled: Optional[bool] = False
 

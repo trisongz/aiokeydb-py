@@ -58,6 +58,7 @@ class Worker:
         name: typing.Optional[str] = None,
         settings: typing.Optional['KeyDBSettings'] = None,
         concurrency: typing.Optional[int] = None,
+        broadcast_concurrency: typing.Optional[int] = None,
         cron_jobs: typing.Optional[typing.List[typing.Callable]] = None,
         startup: typing.Optional[typing.Union[typing.List[typing.Callable], typing.Callable,]] = None,
         shutdown: typing.Optional[typing.Union[typing.List[typing.Callable], typing.Callable,]] = None,
@@ -76,8 +77,11 @@ class Worker:
         self.settings = settings or default_settings
         self.name = name if name is not None else (self.settings.worker.name or get_hostname())
         self.concurrency = concurrency if concurrency is not None else self.settings.worker.concurrency
+        self.broadcast_concurrency = broadcast_concurrency if broadcast_concurrency is not None else self.settings.worker.max_broadcast_concurrency
+        if not self.broadcast_concurrency:
+            self.broadcast_concurrency = 3
+        
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
-
         self.silenced_functions = silenced_functions if silenced_functions is not None else list(set(self.settings.worker.tasks.silenced_functions))
         self.queue.add_silenced_functions(*self.silenced_functions)
 
@@ -180,7 +184,7 @@ class Worker:
         self.worker_attributes['name'] = self.name
         self.queue._worker_name = self.name
         self.logger(kind = "startup").info(
-            f'{self.settings.app_name or "KeyDBWorker"}: {self.name} | WorkerID: {self.worker_id} | {self.settings.app_version} | Build ID: {self.settings.build_id} | Worker Attributes: {self.worker_attributes}')
+            f'{self.settings.app_name or "KeyDBWorker"}: {self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -212,7 +216,7 @@ class Worker:
             for _ in range(self.concurrency):
                 self._process()
             
-            for _ in range(3):
+            for _ in range(self.broadcast_concurrency):
                 self._broadcast_process()
 
             await self.event.wait()

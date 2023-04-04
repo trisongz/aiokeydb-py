@@ -173,7 +173,7 @@ class ConnectionPool(_ConnectionPool):
         try:
             set_ulimits(max_connections)
         except Exception as e:
-            logger.warning(f"Unable to set ulimits for connection: {e}")
+            logger.debug(f"Unable to set ulimits for connection: {e}")
         self.connection_class = connection_class
         self.connection_kwargs = connection_kwargs
         self.max_connections = max_connections

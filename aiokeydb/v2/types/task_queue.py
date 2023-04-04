@@ -3,6 +3,7 @@ import time
 import asyncio
 import typing
 import threading
+
 from contextlib import asynccontextmanager, suppress
 from lazyops.utils.logs import default_logger as logger
 # from lazyops.utils import logger
@@ -158,6 +159,7 @@ class TaskQueue:
         db: typing.Optional[int] = None,
         serializer: typing.Optional[typing.Union[object, SerializerType]] = None,
         max_concurrency: typing.Optional[int] = None,
+        max_broadcast_concurrency: typing.Optional[int] = None,
         client_mode: typing.Optional[bool] = False,
         debug_enabled: typing.Optional[bool] = None,
         # management_url: typing.Optional[str] = None,
@@ -184,6 +186,11 @@ class TaskQueue:
 
         self.client_mode = client_mode
         self.max_concurrency = max_concurrency or self.settings.worker.max_concurrency
+        self.max_broadcast_concurrency = max_broadcast_concurrency or self.settings.worker.max_broadcast_concurrency
+        if not self.max_broadcast_concurrency:
+            # Set as fallback
+            self.max_broadcast_concurrency = 3
+        
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
         # self.management_url = management_url if management_url is not None else self.settings.worker.management_url
         # self.management_enabled = management_enabled if management_enabled is not None else self.settings.worker.management_enabled
@@ -267,8 +274,14 @@ class TaskQueue:
             _stats['connection_kwargs'] = {**self.ctx.async_client.connection_pool.connection_kwargs, **self._ctx_kwargs}
             if not include_retries:
                 _stats['connection_kwargs']['retry_on_error'] = len(_stats['connection_kwargs']['retry_on_error'])
+            
+            # Remove password
+            _ = _stats['connection_kwargs'].pop('password', None)
 
-        if log_stats: self.logger(kind = 'stats').info(f"{_stats}")
+        if log_stats: 
+            self.logger(kind = 'stats').info(f"{_stats}")
+            if _stats.get('max_connections_used') > 95.0:
+                self.logger(kind = 'stats').warning(f"Nearing Maximum connection client Limit: {_stats.get('max_connections_used')}")
         return _stats
     
     @lazyproperty
@@ -367,7 +380,7 @@ class TaskQueue:
         await self.prepare_for_broadcast()
 
         # Each Worker spawns a connection
-        min_connections = ((self.num_workers or 1) * self.max_concurrency) * 10
+        min_connections = ((self.num_workers or 1) * (self.max_concurrency + self.max_broadcast_concurrency)) * 10
 
         curr_max_connections = info['maxclients']
         curr_connected = info['connected_clients']
