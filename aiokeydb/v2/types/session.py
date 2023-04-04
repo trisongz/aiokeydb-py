@@ -1,3 +1,4 @@
+import sys
 import time
 import anyio
 import typing
@@ -24,6 +25,11 @@ from aiokeydb.v2.utils import full_name, args_to_key
 from aiokeydb.v2.serializers import BaseSerializer
 
 from inspect import iscoroutinefunction
+
+if sys.version_info >= (3, 11, 3):
+    from asyncio import timeout as async_timeout
+else:
+    from async_timeout import timeout as async_timeout
 
 logger = logging.getLogger(__name__)
 
@@ -366,6 +372,160 @@ class KeyDBSession:
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.aclose()
+    
+    def publish(self, channel: str, message: typing.Any, **kwargs):
+        """
+        [PubSub] Publishes a message to a channel
+        """
+        return self.client.publish(channel, message, **kwargs)
+
+    async def async_publish(self, channel: str, message: typing.Any, **kwargs):
+        """
+        [PubSub] Publishes a message to a channel
+        """
+        return await self.async_client.publish(channel, message, **kwargs)
+
+    def subscribe(self, *channels: str, **kwargs):
+        """
+        [PubSub] Subscribes to a channel
+        """
+        return self.pubsub.subscribe(*channels, **kwargs)
+    
+    async def async_subscribe(self, *channels: str, **kwargs):
+        """
+        [PubSub] Subscribes to a channel
+        """
+        return await self.async_pubsub.subscribe(*channels, **kwargs)
+
+    def unsubscribe(self, *channels: str, **kwargs):
+        """
+        [PubSub] Unsubscribes from a channel
+        """
+        return self.pubsub.unsubscribe(*channels, **kwargs)
+
+    async def async_unsubscribe(self, *channels: str, **kwargs):
+        """
+        [PubSub] Unsubscribes from a channel
+        """
+        return await self.async_pubsub.unsubscribe(*channels, **kwargs)
+
+    def psubscribe(self, *patterns: str, **kwargs):
+        """
+        [PubSub] Subscribes to a pattern
+        """
+        return self.pubsub.psubscribe(*patterns, **kwargs)
+
+    async def async_psubscribe(self, *patterns: str, **kwargs):
+        """
+        [PubSub] Subscribes to a pattern
+        """
+        return await self.async_pubsub.psubscribe(*patterns, **kwargs)
+
+    def punsubscribe(self, *patterns: str, **kwargs):
+        """
+        [PubSub] Unsubscribes from a pattern
+        """
+        return self.pubsub.punsubscribe(*patterns, **kwargs)
+    
+    async def async_punsubscribe(self, *patterns: str, **kwargs):
+        """
+        [PubSub] Unsubscribes from a pattern
+        """
+        return await self.async_pubsub.punsubscribe(*patterns, **kwargs)
+    
+    def plisten(
+        self, 
+        *patterns: str,
+        timeout: typing.Optional[float] = None,
+        # decode_responses: typing.Optional[bool] = True,
+        unsubscribe_after: typing.Optional[bool] = False,
+        close_after: typing.Optional[bool] = False,
+        listen_callback: typing.Optional[typing.Callable] = None,
+        cancel_callback: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Iterator[typing.Any]:
+        """
+        [PubSub] Listens for messages
+        """
+        def _listen():
+            if timeout:
+                from lazyops.utils import fail_after
+                with contextlib.suppress(TimeoutError):
+                    with fail_after(timeout):
+                        for message in self.pubsub.listen():
+                            if listen_callback: listen_callback(message, **kwargs)
+                            if cancel_callback and cancel_callback(message, **kwargs): 
+                                break
+                            yield message
+            else:
+                for message in self.pubsub.listen():
+                    if listen_callback: listen_callback(message, **kwargs)
+                    if cancel_callback and cancel_callback(message, **kwargs): 
+                        break
+                    yield message
+            
+        try:
+            if patterns:
+                self.pubsub.psubscribe(*patterns)
+            yield from _listen()
+        finally:
+            if unsubscribe_after:
+                self.pubsub.unsubscribe(*patterns)
+            if close_after:
+                self.pubsub.close()
+    
+    async def async_plisten(
+        self,
+        *patterns: str,
+        timeout: typing.Optional[float] = None,
+        # decode_responses: typing.Optional[bool] = True,
+        unsubscribe_after: typing.Optional[bool] = False,
+        close_after: typing.Optional[bool] = False,
+        listen_callback: typing.Optional[typing.Callable] = None,
+        cancel_callback: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.AsyncIterator[typing.Any]:
+        """
+        [PubSub] Listens for messages
+        """
+        async def _listen():
+
+            if timeout:
+                try:
+                    async with async_timeout(timeout):
+                        async for message in self.async_pubsub.listen():
+                            if listen_callback:
+                                await listen_callback(message, **kwargs)
+                            if cancel_callback and await cancel_callback(message, **kwargs):
+                                break
+                            yield message
+                
+                except (TimeoutError, asyncio.TimeoutError):
+                    return
+
+
+            else:
+                async for message in self.async_pubsub.listen():
+                    if listen_callback:
+                        await listen_callback(message, **kwargs)
+                    if cancel_callback and await cancel_callback(message, **kwargs):
+                        break
+                    yield message
+            
+            
+        try:
+            if patterns:
+                await self.async_pubsub.psubscribe(*patterns)
+
+            async for message in _listen():
+                yield message
+    
+        finally:
+            if unsubscribe_after:
+                await self.async_pubsub.unsubscribe(*patterns)
+            if close_after:
+                await self.async_pubsub.close()
+
 
     def serialize(
         self, 

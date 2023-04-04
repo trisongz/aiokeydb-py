@@ -466,6 +466,190 @@ class KeyDBClientMeta(type):
             thread_local = thread_local,
         )
     
+    """
+    PubSub
+    """
+
+    def publish(
+        cls, 
+        channel: str, 
+        message: typing.Any, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Publishes a message to a channel
+        """
+        session = cls.get_session(_session)
+        return session.publish(channel, message, **kwargs)
+
+    async def async_publish(
+        cls, 
+        channel: str, 
+        message: typing.Any, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Publishes a message to a channel
+        """
+        session = cls.get_session(_session)
+        return await session.async_publish(channel, message, **kwargs)
+
+    def subscribe(
+        cls, 
+        *channels: str, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Subscribes to a channel
+        """
+        session = cls.get_session(_session)
+        return session.subscribe(*channels, **kwargs)
+    
+    async def async_subscribe(
+        cls, 
+        *channels: str, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Subscribes to a channel
+        """
+        session = cls.get_session(_session)
+        return await session.async_subscribe(*channels, **kwargs)
+
+    def unsubscribe(
+        cls, 
+        *channels: str, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Unsubscribes from a channel
+        """
+        session = cls.get_session(_session)
+        return session.unsubscribe(*channels, **kwargs)
+
+    async def async_unsubscribe(
+        cls, 
+        *channels: str, 
+        _session: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        [PubSub] Unsubscribes from a channel
+        """
+        session = cls.get_session(_session)
+        return await session.async_unsubscribe(*channels, **kwargs)
+
+    def psubscribe(
+        cls, 
+        *patterns: str, 
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        [PubSub] Subscribes to a pattern
+        """
+        session = cls.get_session(_session)
+        return session.psubscribe(*patterns, **kwargs)
+
+    async def async_psubscribe(
+        cls, 
+        *patterns: str, 
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        [PubSub] Subscribes to a pattern
+        """
+        session = cls.get_session(_session)
+        return await session.async_psubscribe(*patterns, **kwargs)
+
+    def punsubscribe(
+        cls, 
+        *patterns: str, 
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        [PubSub] Unsubscribes from a pattern
+        """
+        session = cls.get_session(_session)
+        return session.punsubscribe(*patterns, **kwargs)
+    
+    async def async_punsubscribe(
+        cls, 
+        *patterns: str, 
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ):
+        """
+        [PubSub] Unsubscribes from a pattern
+        """
+        session = cls.get_session(_session)
+        return await session.async_punsubscribe(*patterns, **kwargs)
+    
+
+    # @contextlib.contextmanager
+    def plisten(
+        cls, 
+        *patterns: str,
+        timeout: typing.Optional[float] = None,
+        # decode_responses: typing.Optional[bool] = True,
+        unsubscribe_after: typing.Optional[bool] = False,
+        close_after: typing.Optional[bool] = False,
+        listen_callback: typing.Optional[typing.Callable] = None,
+        cancel_callback: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Iterator[typing.Any]:
+        """
+        [PubSub] Listens for messages
+        """
+        session = cls.get_session(_session)
+        yield from session.plisten(
+            *patterns, 
+            timeout=timeout, 
+            # decode_responses=decode_responses, 
+            unsubscribe_after=unsubscribe_after, 
+            close_after=close_after,
+            listen_callback = listen_callback,
+            cancel_callback = cancel_callback,
+            **kwargs
+        )
+    
+    # @contextlib.asynccontextmanager
+    async def async_plisten(
+        cls,
+        *patterns: str,
+        timeout: typing.Optional[float] = None,
+        # decode_responses: typing.Optional[bool] = True,
+        unsubscribe_after: typing.Optional[bool] = False,
+        close_after: typing.Optional[bool] = False,
+        listen_callback: typing.Optional[typing.Callable] = None,
+        cancel_callback: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.AsyncIterator[typing.Any]:
+        """
+        [PubSub] Listens for messages
+        """
+        session = cls.get_session(_session)
+        async for message in session.async_plisten(
+            *patterns,
+            timeout=timeout,
+            # decode_responses=decode_responses,
+            unsubscribe_after=unsubscribe_after,
+            close_after=close_after,
+            listen_callback = listen_callback,
+            cancel_callback = cancel_callback,
+            **kwargs
+        ):
+            yield message
+
 
     """
     Primary Functions
