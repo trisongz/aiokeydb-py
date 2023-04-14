@@ -3584,24 +3584,25 @@ def build_cachify_func(
                         return func(*args, **kwargs)
         
             # Remove headers from keybuilder
-            if _exclude_request_headers:
-                _nested_headers = None
-                if keybuilder_kwargs.get("request", None) is not None and keybuilder_kwargs['requests'].get('headers', None) is not None:
-                    headers = keybuilder_kwargs["request"].pop("headers", None)
-                    _nested_headers = True
-                elif keybuilder_kwargs.get("headers", None) is not None:
-                    headers = keybuilder_kwargs.pop("headers", None)
-                    _nested_headers = False
+            # This is dangerous. Dsiable for now.
+            # if _exclude_request_headers:
+            #     _nested_headers = None
+            #     if keybuilder_kwargs.get("request", None) is not None and keybuilder_kwargs['request'].get('headers', None) is not None:
+            #         headers = keybuilder_kwargs["request"].pop("headers", None)
+            #         _nested_headers = True
+            #     elif keybuilder_kwargs.get("headers", None) is not None:
+            #         headers = keybuilder_kwargs.pop("headers", None)
+            #         _nested_headers = False
                 
-                if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
-                    for key in _exclude_request_headers:
-                        _ = headers.pop(key, None)
-                        _ = headers.pop(key.lower(), None)
+            #     if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
+            #         for key in _exclude_request_headers:
+            #             _ = headers.pop(key, None)
+            #             _ = headers.pop(key.lower(), None)
                 
-                    if _nested_headers:
-                        keybuilder_kwargs["request"]["headers"] = headers
-                    else:
-                        keybuilder_kwargs["headers"] = headers
+            #         if _nested_headers:
+            #             keybuilder_kwargs["request"]["headers"] = headers
+            #         else:
+            #             keybuilder_kwargs["headers"] = headers
         
         if exclude_kwargs:
             for key in exclude_kwargs:
@@ -3781,24 +3782,43 @@ def build_cachify_async_func(
                         return await func(*args, **kwargs)
             
             # Remove headers from keybuilder
-            if _exclude_request_headers:
-                _nested_headers = None
-                if keybuilder_kwargs.get("request", None) is not None and keybuilder_kwargs['requests'].get('headers', None) is not None:
-                    headers = keybuilder_kwargs["request"].pop("headers", None)
-                    _nested_headers = True
-                elif keybuilder_kwargs.get("headers", None) is not None:
-                    headers = keybuilder_kwargs.pop("headers", None)
-                    _nested_headers = False
+            # This is dangerous. Disable for now.
+            # if _exclude_request_headers:
+            #     _nested_headers = None
+            #     if keybuilder_kwargs.get("request", None) is not None:
+            #         headers = getattr(keybuilder_kwargs["request"], "headers", None)
+            #         if hasattr(keybuilder_kwargs["request"], "_headers"):
+            #             del keybuilder_kwargs["request"]._headers
+            #         elif hasattr(keybuilder_kwargs["request"], "headers"):
+            #             with contextlib.suppress(Exception):
+            #                 del keybuilder_kwargs["request"].headers
+
+            #         # try:
+            #         #     headers = keybuilder_kwargs["request"].pop("headers", None)
+            #         #     # _nested_headers = True
+            #         # except Exception as e:
+            #         #     headers = getattr(keybuilder_kwargs["request"], "headers", None)
+            #             # setattr(keybuilder_kwargs["request"], "headers", None)
+
+            #         # and keybuilder_kwargs['request'].get('headers', None) is not None:
+            #         # headers = keybuilder_kwargs["request"].pop("headers", None)
+            #         # headers = keybuilder_kwargs["request"]
+            #         _nested_headers = True
+            #     elif keybuilder_kwargs.get("headers", None) is not None:
+            #         headers = keybuilder_kwargs.pop("headers", None)
+            #         _nested_headers = False
                 
-                if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
-                    for key in _exclude_request_headers:
-                        _ = headers.pop(key, None)
-                        _ = headers.pop(key.lower(), None)
-                
-                    if _nested_headers:
-                        keybuilder_kwargs["request"]["headers"] = headers
-                    else:
-                        keybuilder_kwargs["headers"] = headers
+            #     if _nested_headers is not None and isinstance(_exclude_request_headers, (list, tuple)):
+            #         for key in _exclude_request_headers:
+            #             _ = headers.pop(key, None)
+            #             _ = headers.pop(key.lower(), None)
+            #         if _nested_headers:
+            #             keybuilder_kwargs["request"] = {
+            #                 "headers": headers,
+            #                 "request": keybuilder_kwargs["request"]
+            #             }
+            #         else:
+            #             keybuilder_kwargs["headers"] = headers
         
         if exclude_kwargs:
             for key in exclude_kwargs:
