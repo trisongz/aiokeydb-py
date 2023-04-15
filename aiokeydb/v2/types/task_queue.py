@@ -1,3 +1,4 @@
+import os
 import json
 import time
 import asyncio
@@ -172,6 +173,7 @@ class TaskQueue:
         logging_max_length: typing.Optional[int] = 500,
         silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
         heartbeat_ttl: typing.Optional[int] = None, # 10,
+        is_leader_process: typing.Optional[bool] = None,
         **kwargs
     ):
         self.settings = settings
@@ -217,6 +219,9 @@ class TaskQueue:
         self.silenced_functions = silenced_functions or []
         self.heartbeat_ttl = heartbeat_ttl or self.settings.worker.heartbeat_interval
         self._worker_name: str = None
+        self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
+        self.queue_pid: int = os.getpid()
+
         if not self.silenced_functions:
             self._set_silenced_functions()
     
@@ -391,18 +396,18 @@ class TaskQueue:
             curr_max_connections
         )
         curr_ulimits = get_ulimits()
-        if curr_ulimits < new_max_connections:
+        if curr_ulimits < new_max_connections and self.is_leader_process:
             logger.debug(f'The maximum number of concurrent connections may not be supported as ulimits: {curr_ulimits} < desired max connections: {new_max_connections}')
 
-        logger.info(f'Configuring Server: Current Max Connections: {curr_max_connections}, Current Connected: {curr_connected}, Min Connections: {min_connections} -> New Max: {new_max_connections}')
+        if self.is_leader_process: logger.info(f'Configuring Server: Current Max Connections: {curr_max_connections}, Current Connected: {curr_connected}, Min Connections: {min_connections} -> New Max: {new_max_connections}')
         if new_max_connections > curr_max_connections:
             try:
                 await self.ctx.config_set('maxclients', new_max_connections)
                 info = await self.ctx.async_info()
                 new_set_max_connections = info['maxclients']
-                logger.debug(f'New Max Connections: {new_set_max_connections}')
+                if self.is_leader_process: logger.debug(f'New Max Connections: {new_set_max_connections}')
             except Exception as e:
-                if self.debug_enabled:
+                if self.debug_enabled and self.is_leader_process:
                     logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
         # logger.info(f'Pool Class: {self.ctx.client_pools.apool.__class__.__name__}')
 

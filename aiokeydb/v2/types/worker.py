@@ -72,6 +72,7 @@ class Worker:
         silenced_functions: typing.Optional[typing.List[str]] = None,
         worker_attributes: typing.Optional[typing.Dict[str, typing.Any]] = None,
         heartbeat_ttl: typing.Optional[int] = None,
+        is_leader_process: typing.Optional[bool] = None,
     ):
         self.queue = queue
         self.settings = settings or default_settings
@@ -81,6 +82,7 @@ class Worker:
         if not self.broadcast_concurrency:
             self.broadcast_concurrency = 3
         
+        self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
         self.silenced_functions = silenced_functions if silenced_functions is not None else list(set(self.settings.worker.tasks.silenced_functions))
         self.queue.add_silenced_functions(*self.silenced_functions)
@@ -116,12 +118,15 @@ class Worker:
         self.tasks: typing.Set[asyncio.Task] = set()
         self.job_task_contexts: typing.Dict['Job', typing.Dict[str, typing.Any]] = {}
         self.dequeue_timeout = dequeue_timeout
+        self.worker_pid: int = os.getpid()
         self.worker_attributes = worker_attributes or {}
         self.worker_attributes.update({
             # "name": self.name,
             "selectors": self.selectors,
             "worker_id": self.queue.uuid,
             "queue_name": self.queue.queue_name,
+            "is_leader_process": self.is_leader_process,
+            "worker_pid": self.worker_pid,
         })
         self.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl is not None else self.queue.heartbeat_ttl
 
@@ -138,6 +143,7 @@ class Worker:
             else: name = function.__qualname__
             self.functions[name] = function
         # self.logger(kind="startup").info(f"Added {len(self.functions)} functions to worker {self.name}: {self.functions.keys()}")
+        self._worker_identity: str = f'[{self.worker_pid}] {self.settings.app_name or "KeyDBWorker"}'
     
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
@@ -174,17 +180,19 @@ class Worker:
 
     async def start(self):
         """Start processing jobs and upkeep tasks."""
-        self.logger(kind = "startup").info(f'Queue Name: {self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}')
+        # if self.is_leader_process:
+        os.environ['IS_WORKER_PROCESS'] = 'true'
+        self.logger(kind = "startup").info(f'{self._worker_identity}: Queue Name: {self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}')
         if not self.settings.worker_enabled:
             self.logger(kind = "startup").warning(
-                f'{self.settings.app_name or "KeyDBWorker"}: {self.name} is disabled.')
+                f'{self._worker_identity}: {self.name} is disabled.')
             return
         
         self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(), "vars": {}}
         self.worker_attributes['name'] = self.name
         self.queue._worker_name = self.name
         self.logger(kind = "startup").info(
-            f'{self.settings.app_name or "KeyDBWorker"}: {self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
+            f'{self._worker_identity}: {self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -196,12 +204,12 @@ class Worker:
                 for func in self.startup:
                     await func(self.context)
 
-            self.logger(kind = "startup").info(
-                f"Registered {len(self.functions)} functions, {len(self.cron_jobs)} cron jobs, {self.concurrency} concurrency. Functions: {list(self.functions.keys())}"
+            if self.is_leader_process: self.logger(kind = "startup").info(
+                f"{self._worker_identity}: Registered {len(self.functions)} functions, {len(self.cron_jobs)} cron jobs, {self.concurrency} concurrency. Functions: {list(self.functions.keys())}"
             )
-            if self.silenced_functions:
+            if self.silenced_functions and self.is_leader_process:
                 self.logger(kind = "startup").info(
-                    f"Silenced functions: {self.silenced_functions}"
+                    f"{self._worker_identity}: Silenced functions: {self.silenced_functions}"
                 )
 
             # Register the queue
@@ -222,7 +230,7 @@ class Worker:
             await self.event.wait()
         finally:
             self.logger(kind = "shutdown").warning(
-                f'{self.settings.app_name or "KeyDBWorker"}: {self.name} is shutting down.'
+                f'{self._worker_identity}: {self.name} is shutting down.'
                 )
             if self.shutdown:
                 for func in self.shutdown:

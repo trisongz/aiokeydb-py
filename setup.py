@@ -17,7 +17,7 @@ requirements = [
     'importlib-metadata >= 1.0; python_version < "3.8"',
     'typing-extensions; python_version<"3.8"',
     "async-timeout>=4.0.2",
-    'lazyops>=0.2.34',
+    'lazyops>=0.2.38',
     'redis',
     "pydantic",
     "anyio",

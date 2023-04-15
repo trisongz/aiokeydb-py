@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import json
 import socket
@@ -5,6 +7,7 @@ import contextlib
 import logging
 
 from typing import Optional, Dict, Any, Union, Type, Mapping, Callable, List
+
 from lazyops.utils.logs import default_logger as logger
 
 import aiokeydb.v2.exceptions as exceptions
@@ -14,7 +17,6 @@ from aiokeydb.v2.utils import import_string
 from aiokeydb.v2.configs.worker import KeyDBWorkerSettings
 
 from aiokeydb.v2.backoff import default_backoff
-
 
 
 _default_db_mapping = {
@@ -109,6 +111,8 @@ class KeyDBSettings(BaseSettings):
     
     log_level: Optional[str] = 'INFO'
     debug_enabled: Optional[bool] = False
+
+    is_leader_process: Optional[bool] = None
 
     class Config:
         case_sensitive = False
