@@ -474,7 +474,11 @@ class TaskQueue:
         swept = []
         if job_ids:
             for job_id, job_bytes in zip(job_ids, await self.ctx.async_mget(job_ids)):
-                job = self.deserialize(job_bytes)
+                try:
+                    job = self.deserialize(job_bytes)
+                except Exception as e:
+                    job = None
+                    self.logger(kind = "sweep").warning(f"Unable to deserialize job {job_id}: {e}")
                 if not job: 
                     swept.append(job_id)
                     # async with self.pipeline(transaction = True) as pipe:

@@ -73,7 +73,12 @@ class KeyDBClientMeta(type):
                 decode_responses = True,
             )
         return cls._encoder
-        
+    
+    @property
+    def is_leader_process(cls) -> bool:
+        return cls.settings.is_leader_process if \
+            cls.settings.is_leader_process is not None else True
+
     @property
     def has_session(cls) -> bool:
         return bool(cls.current) if cls.sessions else False
@@ -103,7 +108,7 @@ class KeyDBClientMeta(type):
         """
         cls._ctx = session
         cls.current = name or session.name
-        logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
+        if cls.is_leader_process: logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
     
 
     def _configure_pool(
@@ -143,7 +148,7 @@ class KeyDBClientMeta(type):
             not bool(serializer or cls.serializer)
 
         # logger.log(msg = f"Configuring Pool for {name} w/ {uri.key} | decode = {decode_responses}", level = cls.settings.loglevel)
-        logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
+        if cls.is_leader_process: logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
         
         _pool = ClientPools(
             name = name,
@@ -276,7 +281,7 @@ class KeyDBClientMeta(type):
         )
 
         cls.sessions[name] = session
-        logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
+        if cls.is_leader_process: logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
         if (set_current or overwrite) or cls._ctx is None:
             cls._set_ctx(session, name)
         return session
@@ -297,7 +302,7 @@ class KeyDBClientMeta(type):
             logger.warning(f'Session {session.name} already exists')
             return
         cls.sessions[session.name] = session
-        logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
+        if cls.is_leader_process: logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
         if set_current: cls._set_ctx(session)
     
     def create_session(
@@ -330,7 +335,7 @@ class KeyDBClientMeta(type):
             **kwargs,
         )
         cls.sessions[name] = session
-        logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
+        if cls.is_leader_process: logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
         if set_current: cls._set_ctx(session, name)
         return session
     
