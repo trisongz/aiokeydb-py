@@ -1,4 +1,4 @@
-
+import os
 import time
 import uuid
 import random
@@ -24,11 +24,14 @@ def get_hostname() -> str:
     """
     global _NodeName
     if _NodeName is None:
-        import socket
-        while _NodeName is None:
-            with contextlib.suppress(Exception):
-                _NodeName = socket.gethostname()
-            time.sleep(0.5)
+        if os.getenv('HOSTNAME'):
+            _NodeName = os.getenv('HOSTNAME')
+        else:
+            import socket
+            while _NodeName is None:
+                with contextlib.suppress(Exception):
+                    _NodeName = socket.gethostname()
+                time.sleep(0.5)
     return _NodeName
 
 

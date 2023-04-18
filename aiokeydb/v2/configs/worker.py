@@ -65,7 +65,7 @@ class KeyDBWorkerSettings(BaseSettings):
 
     socket_keepalive: Optional[bool] = True
     socket_connect_timeout: Optional[int] = 60
-    heartbeat_interval: Optional[int] = 10
+    heartbeat_interval: Optional[int] = 20
     retry_on_timeout: Optional[bool] = True
     is_leader_process: Optional[bool] = None
 

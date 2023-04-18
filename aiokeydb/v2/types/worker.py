@@ -76,7 +76,8 @@ class Worker:
     ):
         self.queue = queue
         self.settings = settings or default_settings
-        self.name = name if name is not None else (self.settings.worker.name or get_hostname())
+        self.worker_host = get_hostname()
+        self.name = name if name is not None else (self.settings.worker.name or self.worker_host)
         self.concurrency = concurrency if concurrency is not None else self.settings.worker.concurrency
         self.broadcast_concurrency = broadcast_concurrency if broadcast_concurrency is not None else self.settings.worker.max_broadcast_concurrency
         if not self.broadcast_concurrency:
@@ -105,7 +106,7 @@ class Worker:
             "stats": 10,
             "sweep": 180,
             "abort": 1,
-            "heartbeat": 10,
+            "heartbeat": 5,
             "broadcast": 10,
         }
         if timers: self.timers.update(timers)
@@ -123,6 +124,7 @@ class Worker:
         self.worker_attributes.update({
             # "name": self.name,
             "selectors": self.selectors,
+            "worker_host": self.worker_host,
             "worker_id": self.queue.uuid,
             "queue_name": self.queue.queue_name,
             "is_leader_process": self.is_leader_process,
@@ -145,11 +147,15 @@ class Worker:
         # self.logger(kind="startup").info(f"Added {len(self.functions)} functions to worker {self.name}: {self.functions.keys()}")
         self._worker_identity: str = f'[{self.worker_pid}] {self.settings.app_name or "KeyDBWorker"}'
     
+    @property
+    def _worker_name(self):
+        return f"{self.worker_host}.{self.name}.{self.worker_pid}"
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
         if job:
             return logger.bind(
-                worker_name = self.name,
+                # worker_name = self.name,
+                worker_name = self._worker_name,
                 job_id=job.id,
                 status=job.status,
                 queue_name = getattr(job.queue, 'queue_name', self.queue_name) or 'unknown queue',
@@ -157,7 +163,8 @@ class Worker:
             )
         else:
             return logger.bind(
-                worker_name = self.name,
+                worker_name = self._worker_name,
+                # worker_name = self.name,
                 queue_name = self.queue_name,
                 kind=kind,
             )
@@ -185,14 +192,15 @@ class Worker:
         self.logger(kind = "startup").info(f'{self._worker_identity}: Queue Name: {self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}')
         if not self.settings.worker_enabled:
             self.logger(kind = "startup").warning(
-                f'{self._worker_identity}: {self.name} is disabled.')
+                f'{self._worker_identity}: {self.worker_host}.{self.name} is disabled.')
             return
         
         self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(), "vars": {}}
         self.worker_attributes['name'] = self.name
-        self.queue._worker_name = self.name
+        # self.queue._worker_name = self.name
+        self.queue._worker_name = self._worker_name
         self.logger(kind = "startup").info(
-            f'{self._worker_identity}: {self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
+            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -230,7 +238,7 @@ class Worker:
             await self.event.wait()
         finally:
             self.logger(kind = "shutdown").warning(
-                f'{self._worker_identity}: {self.name} is shutting down.'
+                f'{self._worker_identity}: {self.worker_host}.{self.name} is shutting down.'
                 )
             if self.shutdown:
                 for func in self.shutdown:
@@ -267,7 +275,7 @@ class Worker:
                 f'↻ node={self.queue.node_name}, {scheduled}'
             )
 
-    async def heartbeat(self, ttl: int = 10):
+    async def heartbeat(self, ttl: int = 20):
         """
         Send a heartbeat to the queue.
         """
@@ -301,9 +309,9 @@ class Worker:
             asyncio.create_task(
                 poll(self.queue.stats, self.timers["stats"], self.timers["stats"] + 1)
             ),
-            # asyncio.create_task(
-            #     poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
-            # ),
+            asyncio.create_task(
+                poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
+            ),
             # asyncio.create_task(
             #     poll(self._broadcast_process, self.timers["broadcast"])
             # ),
@@ -394,7 +402,7 @@ class Worker:
                     get_and_log_exc()
 
     async def process_broadcast(self):
-        await self.heartbeat(self.heartbeat_ttl)
+        # await self.heartbeat(self.heartbeat_ttl)
         await self.process(broadcast = True)
 
         await self.queue.schedule(lock = 1, worker_id = self.worker_id)

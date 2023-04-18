@@ -948,7 +948,8 @@ class TaskQueue:
 
         else:
             await self.prepare_for_broadcast()
-            worker_kws = [{"worker_id": worker_id} for worker_id in self.active_workers]
+            # worker_kws = [{"worker_id": worker_id} for worker_id in self.active_workers]
+            worker_kws = [{"worker_id": worker_id} for worker_id in await self.get_worker_ids()]
 
         broadcast_kwargs = []
         for kw in iter_kwargs:
@@ -1376,6 +1377,16 @@ class TaskQueue:
                 job_info.append(self.deserialize(job_bytes).to_dict())
         return job_info
 
+    async def get_worker_ids(self) -> typing.List[str]:
+        """
+        Get all worker ids
+        """
+        worker_ids = []
+        for key in await self.ctx.async_zrangebyscore(self.heartbeat_key, now(), "inf"):
+            key: bytes = key.decode("utf-8")
+            *_, worker_uuid = key.split(":")
+            worker_ids.append(worker_uuid)
+        return worker_ids
 
     async def info(self, jobs: bool = False, offset: int = 0, limit: int = 10):
         # pylint: disable=too-many-locals
@@ -1452,6 +1463,8 @@ class TaskQueue:
                 .expire(self.heartbeat_key, heartbeat_ttl)
                 .execute()
             )
+        self.active_workers = await self.get_worker_ids()
+        self.num_workers = len(self.active_workers)
         # self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
         # self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(heartbeat_ttl)))]
         # logger.info(f"Active workers: {self.active_workers}")
@@ -1476,12 +1489,20 @@ class TaskQueue:
         """
         Fetches the current workers
         """
-        current = now()
-        ttl = ttl or self.heartbeat_ttl
-        # self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
-        self.num_workers = await self.ctx.async_zcount(self.heartbeat_key, 1, "-inf")
+        # current = now()
+        # ttl = ttl or self.heartbeat_ttl
+        # # self.num_workers = await self.ctx.async_client.zcount(self.heartbeat_key, 1, "-inf")
+        # worker_ids = []
+        # for key in await self.ctx.async_zrangebyscore(self.heartbeat_key, now(), "inf"):
+        #     key: bytes = key.decode("utf-8")
+        #     *_, worker_uuid = key.split(":")
+        #     worker_ids.append(worker_uuid)
+        # self.active_workers = worker_ids
+        # self.num_workers = len(worker_ids)
+
+        # self.num_workers = await self.ctx.async_zcount(self.heartbeat_key, 1, "-inf")
         # self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_client.zrange(self.heartbeat_key, 0, current + millis(ttl)))]
-        self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_zrange(self.heartbeat_key, 0, current + millis(ttl)))]
+        # self.active_workers = [worker_id.decode("utf-8") for worker_id in (await self.ctx.async_zrange(self.heartbeat_key, 0, current + millis(ttl)))]
         worker_data = await self.ctx.async_mget(
             self.create_namespace(f"worker:attr:{worker_id}") for worker_id in self.active_workers
         )
