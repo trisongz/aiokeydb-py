@@ -330,9 +330,13 @@ class TaskQueue:
                 kind = kind,
             )
     
+    @property
+    def job_id_prefix(self) -> str:
+        return f"queue:{self.queue_name}:{self.settings.worker.job_prefix}"
 
     def job_id(self, job_key):
-        return f"queue:{self.queue_name}:{self.settings.worker.job_prefix}:{job_key}"
+        return f"{self.job_id_prefix}:{job_key}"
+        # return f"queue:{self.queue_name}:{self.settings.worker.job_prefix}:{job_key}"
     
     def register_before_enqueue(self, callback):
         self._before_enqueues[id(callback)] = callback
@@ -570,6 +574,19 @@ class TaskQueue:
         async with self._op_sem:
             return self.deserialize(await self.ctx.async_get(job_id))
 
+    async def wait_for_job_completion(self, job_id: str, results_only: typing.Optional[bool] = False, interval: float = 0.5) -> typing.Any:
+        """
+        Waits for a job completion
+        """
+        job = await self.job(job_id)
+        if not job: raise ValueError(f"Job {job_id} not found")
+        while job.status not in TERMINAL_STATUSES:
+            await asyncio.sleep(interval)
+            job = await self.job(job_id)
+        if not results_only: return job
+        return job.result if job.status == JobStatus.COMPLETE else job.error
+
+
     async def abort(self, job: Job, error: typing.Any, ttl: int = 5):
         """
         Abort a job.
@@ -778,11 +795,18 @@ class TaskQueue:
 
         if isinstance(job_or_func, str):
             job = Job(function=job_or_func, **job_kwargs)
-        else:
+        
+        elif isinstance(job_or_func, Job):
             job = job_or_func
-
             for k, v in job_kwargs.items():
                 setattr(job, k, v)
+        
+        elif callable(job_or_func):
+            job = Job(func = job_or_func.__name__, **job_kwargs)
+        
+        else:
+            raise ValueError(f"Invalid job type {type(job_or_func)}")
+            
 
         if job.queue and job.queue.queue_name != self.queue_name:
             raise ValueError(f"Job {job} registered to a different queue")

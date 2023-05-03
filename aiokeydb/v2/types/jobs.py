@@ -200,7 +200,7 @@ class Job(BaseModel):
         return result
 
 
-    def duration(self, kind):
+    def duration(self, kind) -> int:
         """
         Returns the duration of the job given kind.
 
@@ -218,6 +218,19 @@ class Job(BaseModel):
         if kind == "queued":
             return self._duration(now(), self.queued)
         raise ValueError(f"Unknown duration type: {kind}")
+    
+    @property
+    def job_duration(self) -> int:
+        """
+        Returns the duration of the job in ms.
+        """
+        for kind in {
+            'running', 'total', 'start', 'process', 'queued'
+        }:
+            if duration := self.duration(kind):
+                return duration
+        return 0
+
 
     def _duration(self, a, b):
         #return a - b
