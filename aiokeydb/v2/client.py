@@ -3896,15 +3896,33 @@ class KeyDBClientMeta(type):
         )
     
     
-    async def aclose(cls):
+    async def aclose(cls, verbose: bool = True):
         for name, ctx in cls.sessions.items():
-            logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
+            if verbose: logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
             await ctx.aclose()
         
         cls._sessions = {}
         cls._ctx = None
         cls.current = None
     
+    async def aclose_session(cls, name: str, raise_error: bool = False, verbose: bool = False):
+        if name not in cls.sessions:
+            if raise_error:
+                raise KeyError(f'No session with name: {name}')
+            return
+        
+        sess = cls.sessions[name]
+        await sess.aclose()
+        del cls.sessions[name]
+        if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
+    
+
+    async def aclose_sessions(cls, names: typing.Union[str, typing.List[str]], raise_error: bool = False, verbose: bool = False):
+        if isinstance(names, str):
+            names = [names]
+        for name in names:
+            await cls.aclose_session(name = name, raise_error = raise_error, verbose = verbose)
+
     
     def close(cls):
         for name, ctx in cls.sessions.items():
@@ -3914,7 +3932,23 @@ class KeyDBClientMeta(type):
         cls.sessions = {}
         cls._ctx = None
         cls.current = None
-
+    
+    def close_session(cls, name: str, raise_error: bool = False, verbose: bool = False):
+        if name not in cls.sessions:
+            if raise_error:
+                raise KeyError(f'No session with name: {name}')
+            return
+        
+        sess = cls.sessions[name]
+        sess.close()
+        del cls.sessions[name]
+        if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
+    
+    def close_sessions(cls, names: typing.Union[str, typing.List[str]], raise_error: bool = False, verbose: bool = False):
+        if isinstance(names, str):
+            names = [names]
+        for name in names:
+            cls.close_session(name = name, raise_error = raise_error, verbose = verbose)
     
     def __enter__(self):
         return self
