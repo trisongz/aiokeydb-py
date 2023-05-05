@@ -3905,7 +3905,16 @@ class KeyDBClientMeta(type):
         cls._ctx = None
         cls.current = None
     
-    async def aclose_session(cls, name: str, raise_error: bool = False, verbose: bool = False):
+    async def aclose_session(
+        cls, 
+        name: typing.Optional[str] = None, 
+        session: typing.Optional[KeyDBSession] = None,
+        raise_error: typing.Optional[bool] = False, 
+        verbose: typing.Optional[bool] = False
+    ):
+        if session is None and name is None:
+            raise ValueError('Must specify either name or session')
+        name = name or session.name
         if name not in cls.sessions:
             if raise_error:
                 raise KeyError(f'No session with name: {name}')
@@ -3917,9 +3926,20 @@ class KeyDBClientMeta(type):
         if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
     
 
-    async def aclose_sessions(cls, names: typing.Union[str, typing.List[str]], raise_error: bool = False, verbose: bool = False):
-        if isinstance(names, str):
-            names = [names]
+    async def aclose_sessions(
+        cls, 
+        names: typing.Optional[typing.Union[str, typing.List[str]]] = None,
+        sessions: typing.Optional[typing.Union[KeyDBSession, typing.List[KeyDBSession]]] = None, 
+        raise_error: typing.Optional[bool] = False, 
+        verbose: typing.Optional[bool] = False
+    ):
+        if sessions is None and names is None:
+            raise ValueError('Must specify either names or sessions')
+        if sessions is not None:
+            if not isinstance(sessions, list):
+                sessions = [sessions]
+            names = [sess.name for sess in sessions]
+        elif isinstance(names, str): names = [names]
         for name in names:
             await cls.aclose_session(name = name, raise_error = raise_error, verbose = verbose)
 
@@ -3933,20 +3953,37 @@ class KeyDBClientMeta(type):
         cls._ctx = None
         cls.current = None
     
-    def close_session(cls, name: str, raise_error: bool = False, verbose: bool = False):
+    def close_session(
+        cls, 
+        name: typing.Optional[str] = None, 
+        session: typing.Optional[KeyDBSession] = None,
+        raise_error: typing.Optional[bool] = False, 
+        verbose: typing.Optional[bool] = False
+    ):
+        if session is None and name is None:
+            raise ValueError('Must specify either name or session')
+        name = name or session.name
         if name not in cls.sessions:
             if raise_error:
                 raise KeyError(f'No session with name: {name}')
             return
-        
         sess = cls.sessions[name]
         sess.close()
         del cls.sessions[name]
         if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
     
-    def close_sessions(cls, names: typing.Union[str, typing.List[str]], raise_error: bool = False, verbose: bool = False):
-        if isinstance(names, str):
-            names = [names]
+    def close_sessions(
+        cls,
+        names: typing.Optional[typing.Union[str, typing.List[str]]] = None,
+        sessions: typing.Optional[typing.Union[KeyDBSession, typing.List[KeyDBSession]]] = None, 
+        raise_error: typing.Optional[bool] = False, 
+        verbose: typing.Optional[bool] = False
+    ):
+        if sessions is None and names is None: raise ValueError('Must specify either names or sessions')
+        if sessions is not None:
+            if not isinstance(sessions, list): sessions = [sessions]
+            names = [sess.name for sess in sessions]
+        elif isinstance(names, str): names = [names]
         for name in names:
             cls.close_session(name = name, raise_error = raise_error, verbose = verbose)
     
