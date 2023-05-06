@@ -102,13 +102,14 @@ class KeyDBClientMeta(type):
         cls,
         session: KeyDBSession,
         name: typing.Optional[str] = None,
+        verbose: typing.Optional[bool] = True,
     ):
         """
         Sets the current session context
         """
         cls._ctx = session
         cls.current = name or session.name
-        if cls.is_leader_process: logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
     
 
     def _configure_pool(
@@ -133,6 +134,7 @@ class KeyDBClientMeta(type):
         decode_responses: typing.Optional[bool] = None,
         serializer: typing.Optional[typing.Any] = None,
         loop: asyncio.AbstractEventLoop = None,
+        verbose: typing.Optional[bool] = True,
 
         **config,
     ) -> ClientPools:
@@ -148,7 +150,7 @@ class KeyDBClientMeta(type):
             not bool(serializer or cls.serializer)
 
         # logger.log(msg = f"Configuring Pool for {name} w/ {uri.key} | decode = {decode_responses}", level = cls.settings.loglevel)
-        if cls.is_leader_process: logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
         
         _pool = ClientPools(
             name = name,
@@ -194,7 +196,7 @@ class KeyDBClientMeta(type):
         encoder: typing.Optional[typing.Any] = None,
         serializer: typing.Optional[typing.Any] = None,
         # decode_responses: typing.Optional[bool] = None,
-
+        verbose: typing.Optional[bool] = True,
         loop: asyncio.AbstractEventLoop = None,
         **kwargs,
     ) -> KeyDBSession:
@@ -227,6 +229,7 @@ class KeyDBClientMeta(type):
             # decode_responses = decode_responses,
             serializer = serializer,
             loop = loop,
+            verbose = verbose,
             **config,
             # **kwargs,
         )
@@ -260,10 +263,11 @@ class KeyDBClientMeta(type):
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
         overwrite: typing.Optional[bool] = None,
+        verbose: typing.Optional[bool] = True,
         **config,
     ):
         if name in cls.sessions and overwrite is not True:
-            logger.warning(f'Session {name} already exists')
+            if verbose: logger.warning(f'Session {name} already exists')
             return cls.sessions[name]
         
         session = cls._configure_session(
@@ -277,13 +281,14 @@ class KeyDBClientMeta(type):
             protocol = protocol,
             with_auth = with_auth,
             cache_enabled = cache_enabled,
+            verbose = verbose,
             **config,
         )
 
         cls.sessions[name] = session
-        if cls.is_leader_process: logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
         if (set_current or overwrite) or cls._ctx is None:
-            cls._set_ctx(session, name)
+            cls._set_ctx(session, name, verbose = verbose)
         return session
 
     def add_session(
@@ -291,6 +296,8 @@ class KeyDBClientMeta(type):
         session: KeyDBSession,
         overwrite: bool = False,
         set_current: bool = False,
+        verbose: typing.Optional[bool] = True,
+        # raise_errors: typing.Optional[bool] = True,
         **kwargs
     ):
         """
@@ -299,11 +306,11 @@ class KeyDBClientMeta(type):
         if not isinstance(session, KeyDBSession):
             raise TypeError('Session must be an instance of KeyDBSession')
         if session.name in cls.sessions and not overwrite:
-            logger.warning(f'Session {session.name} already exists')
+            if verbose: logger.warning(f'Session {session.name} already exists')
             return
         cls.sessions[session.name] = session
-        if cls.is_leader_process: logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
-        if set_current: cls._set_ctx(session)
+        if cls.is_leader_process and verbose: logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
+        if set_current: cls._set_ctx(session, verbose = verbose)
     
     def create_session(
         cls,
@@ -314,6 +321,7 @@ class KeyDBClientMeta(type):
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
         _decode_responses: typing.Optional[bool] = None,
+        verbose: typing.Optional[bool] = True,
         **kwargs,
     ):
         """
@@ -322,7 +330,7 @@ class KeyDBClientMeta(type):
         - does not explicitly set the serializer.
         """
         if name in cls.sessions and not overwrite:
-            logger.warning(f'Session {name} already exists')
+            if verbose: logger.warning(f'Session {name} already exists')
             return cls.sessions[name]
         
         decode_responses = kwargs.pop('decode_responses', _decode_responses)
@@ -332,21 +340,23 @@ class KeyDBClientMeta(type):
             cache_enabled = cache_enabled,
             serializer = serializer,
             decode_responses = decode_responses,
+            verbose = verbose,
             **kwargs,
         )
         cls.sessions[name] = session
-        if cls.is_leader_process: logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
-        if set_current: cls._set_ctx(session, name)
+        if cls.is_leader_process and verbose: logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
+        if set_current: cls._set_ctx(session, name, verbose = verbose)
         return session
     
     def set_session(
         cls,
         name: str = None,
+        verbose: typing.Optional[bool] = True,
         **kwargs,
     ):
         if name not in cls.sessions:
-            return cls.init_session(name = name, set_current = True, **kwargs)
-        cls._set_ctx(cls.sessions[name], name)
+            return cls.init_session(name = name, set_current = True, verbose = verbose, **kwargs)
+        cls._set_ctx(cls.sessions[name], name, verbose = verbose,)
     
     def get_session(
         cls,
