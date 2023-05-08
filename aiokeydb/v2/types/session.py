@@ -43,6 +43,19 @@ class ClientPools(BaseModel):
 
     class Config:
         arbitrary_types_allowed = True
+    
+    def with_db_id(
+        self,
+        db_id: int
+    ) -> 'ClientPools':
+        """
+        Returns a new ClientPools with the given db_id
+        """
+        return ClientPools(
+            name = self.name,
+            pool = self.pool.with_db_id(db_id),
+            apool = self.apool.with_db_id(db_id),
+        )
 
 
 class SessionCtx(BaseModel):
@@ -200,6 +213,29 @@ class KeyDBSession:
             self.state.async_lock = AsyncLock(self.async_client)
         return self.state.async_lock
 
+    def with_db_id(
+        self,
+        db_id: int,
+    ) -> 'KeyDBSession':
+        """
+        Initialize a new session with the given db_id
+        if the db_id is different from the current one.
+        """
+        if db_id != self.db_id:
+            return self.__class__(
+                uri = self.uri,
+                name = self.name,
+                client_pools = self.client_pools.with_db_id(db_id),
+                db_id = db_id,
+                encoder = self.encoder,
+                serializer = self.serializer,
+                settings = self.settings,
+                cache_ttl = self.cache_ttl,
+                cache_prefix = self.cache_prefix,
+                cache_enabled = self.cache_enabled,
+                **self.config,
+            )
+        return self
 
     def get_lock(
         self, 

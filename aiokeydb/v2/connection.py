@@ -201,6 +201,24 @@ class ConnectionPool(_ConnectionPool):
         self._pubsub_encoder = self.get_pubsub_encoder() if self.auto_pubsub else None
         self._auto_reset_enabled = auto_reset_enabled
 
+    @property
+    def db_id(self):
+        return self.connection_kwargs.get("db", 0)
+    
+    def with_db_id(self, db_id: int) -> 'ConnectionPool':
+        """
+        Return a new connection pool with the specified db_id.
+        """
+        kwargs = self.connection_kwargs.copy()
+        kwargs["db"] = db_id
+        return self.__class__(
+            connection_class = self.connection_class,
+            max_connections = self.max_connections,
+            auto_pubsub = self.auto_pubsub,
+            pubsub_decode_responses = self.pubsub_decode_responses,
+            auto_reset_enabled = self._auto_reset_enabled,
+            **kwargs
+        )
 
     def reset(self):
         "Reset the pool"
@@ -439,7 +457,26 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         self._pubsub_encoder = self.get_pubsub_encoder() if self.auto_pubsub else None
         self._auto_reset_enabled = auto_reset_enabled
 
+    @property
+    def db_id(self):
+        return self.connection_kwargs.get("db", 0)
     
+    def with_db_id(self, db_id: int) -> 'AsyncConnectionPool':
+        """
+        Return a new connection pool with the specified db_id.
+        """
+        kwargs = self.connection_kwargs.copy()
+        kwargs["db"] = db_id
+        return self.__class__(
+            connection_class=self.connection_class,
+            max_connections=self.max_connections,
+            auto_pubsub=self.auto_pubsub,
+            pubsub_decode_responses=self.pubsub_decode_responses,
+            auto_reset_enabled=self._auto_reset_enabled,
+            **kwargs,
+        )
+        
+
     def reset(self):
         if not self._lock:
             self._lock = asyncio.Lock()
@@ -633,6 +670,26 @@ class BlockingConnectionPool(ConnectionPool):
             **connection_kwargs,
         )
 
+    @property
+    def db_id(self):
+        return self.connection_kwargs.get("db", 0)
+    
+    def with_db_id(self, db_id: int) -> 'BlockingConnectionPool':
+        """
+        Return a new connection pool with the specified db_id.
+        """
+        kwargs = self.connection_kwargs.copy()
+        kwargs["db"] = db_id
+        return self.__class__(
+            max_connections=self.max_connections,
+            timeout=self.timeout,
+            connection_class=self.connection_class,
+            queue_class=self.queue_class,
+            auto_pubsub=self.auto_pubsub,
+            pubsub_decode_responses=self.pubsub_decode_responses,
+            auto_reset_enabled=self._auto_reset_enabled,
+            **kwargs,
+        )
     
     def reset(self):
         # Create and fill up a thread safe queue with ``None`` values.
@@ -810,6 +867,27 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
             **connection_kwargs,
         )
 
+
+    @property
+    def db_id(self):
+        return self.connection_kwargs.get("db", 0)
+    
+    def with_db_id(self, db_id: int) -> 'AsyncBlockingConnectionPool':
+        """
+        Return a new connection pool with the specified db_id.
+        """
+        kwargs = self.connection_kwargs.copy()
+        kwargs["db"] = db_id
+        return self.__class__(
+            max_connections=self.max_connections,
+            timeout=self.timeout,
+            connection_class=self.connection_class,
+            queue_class=self.queue_class,
+            auto_pubsub=self.auto_pubsub,
+            pubsub_decode_responses=self.pubsub_decode_responses,
+            auto_reset_enabled=self._auto_reset_enabled,
+            **kwargs,
+        )
     
     def reset(self):
         # Create and fill up a thread safe queue with ``None`` values.
