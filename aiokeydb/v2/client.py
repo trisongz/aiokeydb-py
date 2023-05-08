@@ -9,7 +9,7 @@ import typing
 import logging
 import contextlib
 import functools
-
+from pydantic.types import ByteSize
 from aiokeydb.v2.lock import Lock, AsyncLock
 from aiokeydb.v2.connection import (
     Encoder, 
@@ -29,7 +29,7 @@ from aiokeydb.v2.core import (
     AsyncPipeline,
 )
 
-from aiokeydb.v2.typing import Number, KeyT, AbsExpiryT, ExpiryT
+from aiokeydb.v2.typing import Number, KeyT, AbsExpiryT, ExpiryT, PatternT
 from aiokeydb.v2.configs import KeyDBSettings, KeyDBWorkerSettings, settings as default_settings
 from aiokeydb.v2.types import KeyDBUri
 from aiokeydb.v2.types.session import KeyDBSession, ClientPools
@@ -3271,6 +3271,57 @@ class KeyDBClientMeta(type):
         return await session.async_zscan(name, cursor, match, count, score_cast_func, **kwargs)
     
     
+    def scan_iter(
+        cls,
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> typing.Iterator:
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        session = cls.get_session(_session)
+        return session.scan_iter(match, count, _type, **kwargs)
+
+    async def async_scan_iter(
+        cls,
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> typing.AsyncIterator:
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        session = cls.get_session(_session)
+        async for key in session.async_scan_iter(match, count, _type, **kwargs):
+            yield key
+
     def zunion(
         cls,
         name: str,
@@ -3905,6 +3956,116 @@ class KeyDBClientMeta(type):
             **kwargs
         )
     
+    def get_key_sizes(
+        cls, 
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        min_size: typing.Union[ByteSize, int, str, None] = None,
+        max_size: typing.Union[ByteSize, int, str, None] = None,
+        raise_error: typing.Optional[bool] = False,
+        parse: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = True,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> typing.Iterator[typing.Tuple[str, typing.Union[ByteSize, int]]]:
+        """
+        Returns an iterator that yields a tuple of key name and size in bytes or a ByteSize object
+        """
+        session = cls.get_session(_session)
+        yield from session.get_key_sizes(
+            match = match,
+            count = count,
+            _type = _type,
+            min_size = min_size,
+            max_size = max_size,
+            raise_error = raise_error,
+            parse = parse,
+            verbose = verbose,
+            **kwargs,
+        )
+    
+    async def async_get_key_sizes(
+        cls, 
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        min_size: typing.Union[ByteSize, int, str, None] = None,
+        max_size: typing.Union[ByteSize, int, str, None] = None,
+        raise_error: typing.Optional[bool] = False,
+        parse: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = True,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> typing.AsyncIterator[typing.Tuple[str, typing.Union[ByteSize, int]]]:
+        """
+        Returns an iterator that yields a tuple of key name and size in bytes or a ByteSize object
+        """
+        session = cls.get_session(_session)
+        async for (key, size) in session.async_get_key_sizes(
+            match = match,
+            count = count,
+            _type = _type,
+            min_size = min_size,
+            max_size = max_size,
+            raise_error = raise_error,
+            parse = parse,
+            verbose = verbose,
+            **kwargs,
+        ):
+            yield (key, size)
+        
+
+
+    """
+    CLI Commands
+    """
+
+    def cli(
+        cls,
+        args: typing.Union[str, typing.List[str]], 
+        shell: bool = True, 
+        raise_error: bool = True, 
+        entrypoint: str = 'keydb-cli',
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> str:
+        """
+        Runs a CLI command on the server
+        """
+        session = cls.get_session(_session)
+        return session._cli(
+            args = args,
+            shell = shell,
+            raise_error = raise_error,
+            entrypoint = entrypoint,
+            **kwargs
+        )
+    
+    async def async_cli(
+        cls,
+        args: typing.Union[str, typing.List[str]],
+        stdout = asyncio.subprocess.PIPE, 
+        stderr = asyncio.subprocess.PIPE, 
+        output_encoding: str = 'UTF-8', 
+        output_errors: str = 'ignore',
+        entrypoint: str = 'keydb-cli',
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Runs a CLI command on the server
+        """
+        session = cls.get_session(_session)
+        return await session._async_cli(
+            args = args,
+            stdout = stdout,
+            stderr = stderr,
+            output_encoding = output_encoding,
+            output_errors = output_errors,
+            entrypoint = entrypoint,
+            **kwargs
+        )
     
     async def aclose(cls, verbose: bool = True):
         for name, ctx in cls.sessions.items():
@@ -4008,6 +4169,7 @@ class KeyDBClientMeta(type):
     
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         await self.aclose()
+
     
     
     def cachify(

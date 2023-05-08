@@ -455,4 +455,20 @@ class KeyDBUri(BaseModel):
         """
         return hashlib.md5(self.uri.encode('ascii')).hexdigest()
 
+    @lazyproperty
+    def connection_args(self) -> typing.List[str]:
+        """
+        Returns the connection arguments for CLI usage
+        """
+        args = []
+        if self.host:
+            args.append(f'-h {self.host}')
+        if self.port:
+            args.append(f'-p {self.port}')
+        if self.username:
+            args.append(f'--user {self.username}')
+        if self.password:
+            args.append(f'-a {self.password} --no-auth-warning')
+        return args
+
 

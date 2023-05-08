@@ -4,12 +4,11 @@ import anyio
 import typing
 import logging
 import asyncio
-
 import functools
 import contextlib
 from pydantic import BaseModel
 from pydantic.types import ByteSize
-from aiokeydb.v2.typing import Number, KeyT, ExpiryT, AbsExpiryT
+from aiokeydb.v2.typing import Number, KeyT, ExpiryT, AbsExpiryT, PatternT
 from aiokeydb.v2.lock import Lock, AsyncLock
 from aiokeydb.v2.core import KeyDB, PubSub, Pipeline
 from aiokeydb.v2.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
@@ -2653,6 +2652,54 @@ class KeyDBSession:
         """
         return await self.async_client.zscan(name, cursor, match, count, score_cast_func, **kwargs)
     
+    def scan_iter(
+        self,
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        **kwargs,
+    ) -> typing.Iterator:
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        return self.client.scan_iter(match, count, _type, **kwargs)
+
+    async def async_scan_iter(
+        self,
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        **kwargs,
+    ) -> typing.AsyncIterator:
+        """
+        Make an iterator using the SCAN command so that the client doesn't
+        need to remember the cursor position.
+
+        ``match`` allows for filtering the keys by pattern
+
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
+
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+        """
+        async for key in self.async_client.scan_iter(match, count, _type, **kwargs):
+            yield key
+        
+
     def zunion(
         self,
         name: str,
@@ -3497,6 +3544,129 @@ class KeyDBSession:
         stats['available_connections'] = stats['maxclients'] - stats['connected_clients']
         stats['max_connections_used'] = (stats['connected_clients'] / stats['maxclients']) * 100.0
         return stats
+    
+    def get_key_sizes(
+        self, 
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        min_size: typing.Union[ByteSize, int, str, None] = None,
+        max_size: typing.Union[ByteSize, int, str, None] = None,
+        raise_error: typing.Optional[bool] = False,
+        parse: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = True,
+        **kwargs,
+    ) -> typing.Iterator[typing.Tuple[str, typing.Union[ByteSize, int]]]:
+        """
+        Returns an iterator that yields a tuple of key name and size in bytes or a ByteSize object
+        """
+        if min_size is not None and not isinstance(min_size, ByteSize):
+            min_size = ByteSize.validate(min_size)
+        if max_size is not None and not isinstance(max_size, ByteSize):
+            max_size = ByteSize.validate(max_size)
+
+        for key in self.scan_iter(match=match, count=count, _type=_type, **kwargs):
+            try:
+                size = self.strlen(key)
+                if parse: size = ByteSize.validate(size)
+                if min_size is not None and size < min_size: continue
+                if max_size is not None and size > max_size: continue
+                yield key, size
+            except Exception as e:
+                if raise_error: raise e
+                if verbose: logger.error(f'Error getting size of key {key}: {e}')
+    
+    async def async_get_key_sizes(
+        self, 
+        match: typing.Union[PatternT, None] = None,
+        count: typing.Union[int, None] = None,
+        _type: typing.Union[str, None] = None,
+        min_size: typing.Union[ByteSize, int, str, None] = None,
+        max_size: typing.Union[ByteSize, int, str, None] = None,
+        raise_error: typing.Optional[bool] = False,
+        parse: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = True,
+        **kwargs,
+    ) -> typing.AsyncIterator[typing.Tuple[str, typing.Union[ByteSize, int]]]:
+        """
+        Returns an iterator that yields a tuple of key name and size in bytes or a ByteSize object
+        """
+        
+        if min_size is not None and not isinstance(min_size, ByteSize):
+            min_size = ByteSize.validate(min_size)
+        if max_size is not None and not isinstance(max_size, ByteSize):
+            max_size = ByteSize.validate(max_size)
+        
+        async for key in self.async_scan_iter(match=match, count=count, _type=_type, **kwargs):
+            try:
+                size = await self.async_strlen(key)
+                if parse: size = ByteSize.validate(size)
+                if min_size is not None and size < min_size: continue
+                if max_size is not None and size > max_size: continue
+                yield key, size
+            except Exception as e:
+                if raise_error: raise e
+                if verbose: logger.error(f'Error getting size of key {key}: {e}')
+    
+
+    """
+    CLI Commands
+    """
+
+    def _cli(
+        self, 
+        args: typing.Union[str, typing.List[str]], 
+        shell: bool = True, 
+        raise_error: bool = True, 
+        entrypoint: str = 'keydb-cli',
+        **kwargs,
+    ) -> str:
+        """
+        Runs a CLI command on the server
+        """
+        base_args = self.uri.connection_args.copy()
+        if not isinstance(args, list):
+            args = [args]
+        base_args.extend(args)
+        command = " ".join(base_args)
+        if '-n' not in command:
+            command = f'{command} -n {self.uri.db_id}'
+        if entrypoint not in command:
+            command = f'{entrypoint} {command}'
+        import subprocess
+        try:
+            out = subprocess.check_output(command, shell=shell, **kwargs)
+            if isinstance(out, bytes): out = out.decode('utf8')
+            return out.strip()
+        except Exception as e:
+            if not raise_error: return ""
+            raise e
+
+    async def _async_cli(
+        self,
+        args: typing.Union[str, typing.List[str]],
+        stdout = asyncio.subprocess.PIPE, 
+        stderr = asyncio.subprocess.PIPE, 
+        output_encoding: str = 'UTF-8', 
+        output_errors: str = 'ignore',
+        entrypoint: str = 'keydb-cli',
+        **kwargs
+    ) -> str:
+        """
+        Runs a CLI command on the server
+        """
+        base_args = self.uri.connection_args.copy()
+        if not isinstance(args, list):
+            args = [args]
+        base_args.extend(args)
+        command = " ".join(base_args)
+        if '-n' not in command:
+            command = f'{command} -n {self.uri.db_id}'
+        if entrypoint not in command:
+            command = f'{entrypoint} {command}'
+        p = await asyncio.subprocess.create_subprocess_shell(command, stdout = stdout, stderr = stderr, **kwargs)
+        stdout, _ = await p.communicate()
+        return stdout.decode(encoding = output_encoding, errors = output_errors).strip()
 
 
 def build_cachify_func(
