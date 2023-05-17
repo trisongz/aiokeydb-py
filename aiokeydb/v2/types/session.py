@@ -2883,6 +2883,418 @@ class KeyDBSession:
         """
         return await self.async_client.execute_command(*args, **kwargs)
 
+    def replicaof(
+        self,
+        host: str,
+        port: typing.Optional[int] = 6379,
+        **kwargs,
+    ) -> bool:
+        """
+        Make the server a replica of another instance, or promote it as master
+        """
+        return self.client.replicaof(host, port, **kwargs)
+
+    async def async_replicaof(
+        self,
+        host: str,
+        port: typing.Optional[int] = 6379,
+        **kwargs,
+    ) -> bool:
+        """
+        Make the server a replica of another instance, or promote it as master
+        """
+        return await self.async_client.replicaof(host, port, **kwargs)
+    
+    """
+    Set Commands
+    """
+
+    def sadd(
+        self,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a set
+        """
+        if _serialize: values = [self.serialize(value, _serializer, **kwargs) for value in values]
+        return self.client.sadd(name, *values, **kwargs)
+    
+    async def async_sadd(
+        self,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a set
+        """
+        if _serialize: values = [self.serialize(value, _serializer, **kwargs) for value in values]
+        return await self.async_client.sadd(name, *values, **kwargs)
+    
+    def scard(
+        self,
+        name: str,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a set
+        """
+        return self.client.scard(name, **kwargs)
+    
+    async def async_scard(
+        self,
+        name: str,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a set
+        """
+        return await self.async_client.scard(name, **kwargs)
+    
+    def sdiff(
+        self,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Subtract multiple sets and return the resulting set
+        """
+        values = self.client.sdiff(keys, *args, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+        
+    
+    async def async_sdiff(
+        self,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Subtract multiple sets and return the resulting set
+        """
+        values = await self.async_client.sdiff(keys, *args, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    def sdiffstore(
+        self,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Subtract multiple sets and store the resulting set in a key
+        """
+        return self.client.sdiffstore(destination, keys, *args, **kwargs)
+    
+    async def async_sdiffstore(
+        self,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Subtract multiple sets and store the resulting set in a key
+        """
+        return await self.async_client.sdiffstore(destination, keys, *args, **kwargs)
+    
+    def sinter(
+        self,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Intersect multiple sets
+        """
+        values = self.client.sinter(keys, *args, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    async def async_sinter(
+        self,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Intersect multiple sets
+        """
+        values = await self.async_client.sinter(keys, *args, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    def sinterstore(
+        self,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sets and store the resulting set in a key
+        """
+        return self.client.sinterstore(destination, keys, *args, **kwargs)
+    
+    async def async_sinterstore(
+        self,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sets and store the resulting set in a key
+        """
+        return await self.async_client.sinterstore(destination, keys, *args, **kwargs)
+    
+    def sismember(
+        self,
+        name: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a given value is a member of a set
+        """
+        if _serialize: value = self.serialize(value, _serializer, **kwargs)
+        return self.client.sismember(name, value, **kwargs)
+    
+    async def async_sismember(
+        self,
+        name: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a given value is a member of a set
+        """
+        if _serialize: value = self.serialize(value, _serializer, **kwargs)
+        return await self.async_client.sismember(name, value, **kwargs)
+    
+    def smembers(
+        self,
+        name: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Get all the members in a set
+        """
+        values = self.client.smembers(name, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    async def async_smembers(
+        self,
+        name: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Get all the members in a set
+        """
+        values = await self.async_client.smembers(name, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    def smove(
+        self,
+        source: str,
+        destination: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a member from one set to another
+        """
+        if _serialize: value = self.serialize(value, _serializer, **kwargs)
+        return self.client.smove(source, destination, value, **kwargs)
+    
+    async def async_smove(
+        self,
+        source: str,
+        destination: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a member from one set to another
+        """
+        if _serialize: value = self.serialize(value, _serializer, **kwargs)
+        return await self.async_client.smove(source, destination, value, **kwargs)
+    
+    def spop(
+        self,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Remove and return one or multiple random members from a set
+        """
+        values = self.client.spop(name, count, **kwargs)
+        if _return_raw_values: return values
+        if count: return [self.deserialize(value, _serializer, **kwargs) for value in values]
+        return self.deserialize(values, _serializer, **kwargs)
+    
+    async def async_spop(
+        self,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Remove and return one or multiple random members from a set
+        """
+        values = await self.async_client.spop(name, count, **kwargs)
+        if _return_raw_values: return values
+        if count: return [self.deserialize(value, _serializer, **kwargs) for value in values]
+        return self.deserialize(values, _serializer, **kwargs)
+
+    def srandmember(
+        self,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Get one or multiple random members from a set
+        """
+        values = self.client.srandmember(name, count, **kwargs)
+        if _return_raw_values: return values
+        if count: return [self.deserialize(value, _serializer, **kwargs) for value in values]
+        return self.deserialize(values, _serializer, **kwargs)
+    
+    async def async_srandmember(
+        self,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Get one or multiple random members from a set
+        """
+        values = await self.async_client.srandmember(name, count, **kwargs)
+        if _return_raw_values: return values
+        if count: return [self.deserialize(value, _serializer, **kwargs) for value in values]
+        return self.deserialize(values, _serializer, **kwargs)
+    
+    def srem(
+        self,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a set
+        """
+        if _serialize: values = [self.serialize(value, _serializer, **kwargs) for value in values]
+        return self.client.srem(name, *values, **kwargs)
+    
+    async def async_srem(
+        self,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a set
+        """
+        if _serialize: values = [self.serialize(value, _serializer, **kwargs) for value in values]
+        return await self.async_client.srem(name, *values, **kwargs)
+    
+
+    def sunion(
+        self,
+        *names: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Return the union of multiple sets
+        """
+        values = self.client.sunion(*names, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+
+    async def async_sunion(
+        self,
+        *names: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Return the union of multiple sets
+        """
+        values = await self.async_client.sunion(*names, **kwargs)
+        if _return_raw_values: return values
+        return {self.deserialize(value, _serializer, **kwargs) for value in values}
+    
+    def sunionstore(
+        self,
+        destination: str,
+        *names: str,
+        **kwargs
+    ) -> int:
+        """
+        Store the union of multiple sets in a key
+        """
+        return self.client.sunionstore(destination, *names, **kwargs)
+    
+    async def async_sunionstore(
+        self,
+        destination: str,
+        *names: str,
+        **kwargs
+    ) -> int:
+        """
+        Store the union of multiple sets in a key
+        """
+        return await self.async_client.sunionstore(destination, *names, **kwargs)
+
 
     """
     Other utilities
@@ -3623,7 +4035,7 @@ class KeyDBSession:
         parse: typing.Optional[bool] = True,
         verbose: typing.Optional[bool] = True,
         **kwargs,
-    ) -> typing.AsyncIterator[typing.Tuple[str, typing.Union[ByteSize, int]]]:
+    ) -> typing.AsyncIterator[typing.Tuple[bytes, typing.Union[ByteSize, int]]]:
         """
         Returns an iterator that yields a tuple of key name and size in bytes or a ByteSize object
         """

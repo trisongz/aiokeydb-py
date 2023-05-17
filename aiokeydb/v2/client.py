@@ -5,6 +5,7 @@ KeyDB Metaclass
 """
 import anyio
 import asyncio
+import traceback
 import typing
 import logging
 import contextlib
@@ -3383,6 +3384,420 @@ class KeyDBClientMeta(type):
     
 
     """
+    Set Commands
+    """
+
+    def sadd(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a set
+        """
+        session = cls.get_session(_session)
+        return session.sadd(name, *values, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    async def async_sadd(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Add one or more members to a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_sadd(name, *values, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    def scard(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a set
+        """
+        session = cls.get_session(_session)
+        return session.scard(name, **kwargs)
+    
+    async def async_scard(
+        cls,
+        name: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Get the number of members in a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_scard(name, **kwargs)
+    
+    def sdiff(
+        cls,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Subtract multiple sets and return the resulting set
+        """
+        session = cls.get_session(_session)
+        return session.sdiff(keys, *args, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+        
+    
+    async def async_sdiff(
+        cls,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Subtract multiple sets and return the resulting set
+        """
+        session = cls.get_session(_session)
+        return await session.async_sdiff(keys, *args, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+    
+    def sdiffstore(
+        cls,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Subtract multiple sets and store the resulting set in a key
+        """
+        session = cls.get_session(_session)
+        return session.sdiffstore(destination, keys, *args, **kwargs)
+    
+    async def async_sdiffstore(
+        cls,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Subtract multiple sets and store the resulting set in a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_sdiffstore(destination, keys, *args, **kwargs)
+    
+    def sinter(
+        cls,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Intersect multiple sets
+        """
+        session = cls.get_session(_session)
+        return session.sinter(keys, *args, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+
+    
+    async def async_sinter(
+        cls,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Intersect multiple sets
+        """
+        session = cls.get_session(_session)
+        return await session.async_sinter(keys, *args, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+    
+    def sinterstore(
+        cls,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sets and store the resulting set in a key
+        """
+        session = cls.get_session(_session)
+        return session.sinterstore(destination, keys, *args, **kwargs)
+    
+    async def async_sinterstore(
+        cls,
+        destination: str,
+        keys: typing.Union[str, typing.Iterable],
+        *args: typing.Any,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Intersect multiple sets and store the resulting set in a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_sinterstore(destination, keys, *args, **kwargs)
+    
+    def sismember(
+        cls,
+        name: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a given value is a member of a set
+        """
+        session = cls.get_session(_session)
+        return session.sismember(name, value, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    async def async_sismember(
+        cls,
+        name: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Determine if a given value is a member of a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_sismember(name, value, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    def smembers(
+        cls,
+        name: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Get all the members in a set
+        """
+        session = cls.get_session(_session)
+        return session.smembers(name, _return_raw_values = _return_raw_values, _serializer = _serializer,  **kwargs)
+    
+    async def async_smembers(
+        cls,
+        name: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Get all the members in a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_smembers(name, _return_raw_values = _return_raw_values, _serializer = _serializer,  **kwargs)
+    
+    def smove(
+        cls,
+        source: str,
+        destination: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a member from one set to another
+        """
+        session = cls.get_session(_session)
+        return session.smove(source, destination, value, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    async def async_smove(
+        cls,
+        source: str,
+        destination: str,
+        value: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Move a member from one set to another
+        """
+        session = cls.get_session(_session)
+        return await session.async_smove(source, destination, value, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    def spop(
+        cls,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Remove and return one or multiple random members from a set
+        """
+        session = cls.get_session(_session)
+        return session.spop(name, count, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+    
+    async def async_spop(
+        cls,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Remove and return one or multiple random members from a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_spop(name, count, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+
+    def srandmember(
+        cls,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Get one or multiple random members from a set
+        """
+        session = cls.get_session(_session)
+        return session.srandmember(name, count, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+    
+    async def async_srandmember(
+        cls,
+        name: str,
+        count: typing.Optional[int] = None,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Union[typing.Any, typing.List]:
+        """
+        Get one or multiple random members from a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_srandmember(name, count, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+    
+    def srem(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a set
+        """
+        session = cls.get_session(_session)
+        return session.srem(name, *values, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+    async def async_srem(
+        cls,
+        name: str,
+        *values: typing.Any,
+        _serialize: typing.Optional[bool] = True,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Remove one or more members from a set
+        """
+        session = cls.get_session(_session)
+        return await session.async_srem(name, *values, _serialize = _serialize, _serializer = _serializer, **kwargs)
+    
+
+    def sunion(
+        cls,
+        *names: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Return the union of multiple sets
+        """
+        session = cls.get_session(_session)
+        return session.sunion(*names, _return_raw_values = _return_raw_values, _serializer = _serializer, **kwargs)
+
+    async def async_sunion(
+        cls,
+        *names: str,
+        _return_raw_values: typing.Optional[bool] = None,
+        _serializer: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> typing.Set:
+        """
+        Return the union of multiple sets
+        """
+        session = cls.get_session(_session)
+        return await session.async_sunion(*names, _return_raw_values = _return_raw_values, _serializer = _serializer,  **kwargs)
+    
+    def sunionstore(
+        cls,
+        destination: str,
+        *names: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Store the union of multiple sets in a key
+        """
+        session = cls.get_session(_session)
+        return session.sunionstore(destination, *names, **kwargs)
+    
+    async def async_sunionstore(
+        cls,
+        destination: str,
+        *names: str,
+        _session: typing.Optional[str] = None,
+        **kwargs
+    ) -> int:
+        """
+        Store the union of multiple sets in a key
+        """
+        session = cls.get_session(_session)
+        return await session.async_sunionstore(destination, *names, **kwargs)
+
+
+
+
+    """
     Other utilities
     """
     
@@ -3401,6 +3816,33 @@ class KeyDBClientMeta(type):
         """
         session = cls.get_session(_session)
         return await session.async_command(**kwargs)
+    
+    def replicaof(
+        cls,
+        host: str,
+        port: typing.Optional[int] = 6379,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> bool:
+        """
+        Make the server a replica of another instance, or promote it as master
+        """
+        session = cls.get_session(_session)
+        return session.replicaof(host, port, **kwargs)
+
+    async def async_replicaof(
+        cls,
+        host: str,
+        port: typing.Optional[int] = 6379,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ) -> bool:
+        """
+        Make the server a replica of another instance, or promote it as master
+        """
+        session = cls.get_session(_session)
+        return await session.async_replicaof(host, port, **kwargs)
+    
     
     
     def transaction(
@@ -4015,6 +4457,92 @@ class KeyDBClientMeta(type):
         ):
             yield (key, size)
         
+    @contextlib.asynccontextmanager
+    async def afail_after(
+        cls, 
+        timeout: typing.Optional[float] = 5.0, 
+        verbose: typing.Optional[bool] = True,
+        raise_error: typing.Optional[bool] = True,
+        trace_error: typing.Optional[bool] = False,
+        **kwargs
+    ):
+        """
+        Context manager that will fail after a certain timeout
+        """
+        try:
+            async with anyio.fail_after(timeout):
+                yield
+        except Exception as e:
+            if verbose:
+                logger.error(f"Failed after {timeout} seconds: {e}")
+            if trace_error:
+                logger.error(traceback.format_exc())
+            if raise_error:
+                raise e
+
+    async def aspawn_server(
+        cls, 
+        *args: typing.Iterable[str], 
+        host: typing.Optional[str] = '0.0.0.0',
+        port: typing.Optional[int] = 6379,
+        password: typing.Optional[str] = None,
+        active_replica: typing.Optional[bool] = False,
+        multi_master: typing.Optional[bool] = False,
+        register_session: typing.Optional[bool] = True,
+        session_name: typing.Optional[str] = None,
+        **kwargs
+    ) -> asyncio.subprocess.Process:
+        """
+        Spawns a keydb server
+        """
+        cmd_args = list(args)
+        for n, arg in enumerate(cmd_args):
+            if not arg.startswith('--'):
+                cmd_args[n] = f'--{arg}'
+
+        cmd_args.append(
+            f'--port {port}',
+            f'--bind "{host}"',
+        )
+        if password:
+            cmd_args.append(
+                f'--requirepass "{password}"',
+                f'--masterauth "{password}"',
+            )
+        if active_replica:
+            cmd_args.append(
+                '--active-replica yes'
+            )
+        if multi_master:
+            cmd_args.append(
+                '--multi-master yes'
+            )
+        cmd = ' '.join(cmd_args)
+        logger.debug(f"Spawning server: {cmd}")
+        pid = await asyncio.create_subprocess_shell(f"keydb-server {args}", **kwargs)
+        if register_session:
+            session_name = session_name or 'server'
+            cls.init_session(
+                session_name, host = host, port = port, password = password,
+            )
+        
+        event = asyncio.Event()
+        async def run_until_error():
+            nonlocal pid
+            while not event.is_set():
+                try:
+                    await asyncio.sleep(1)
+                except Exception as e:
+                    logger.error(f'KeyDB Error: {e}')
+                    break
+            
+            logger.warning(f'Stopping KeyDB on PID: {pid.pid}')
+            pid.terminate()
+            pid.kill()
+            pid = None    
+
+        await asyncio.create_task(run_until_error())
+        return pid
 
 
     """

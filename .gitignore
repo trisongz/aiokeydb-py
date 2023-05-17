@@ -27,3 +27,4 @@ aiokeydb/mutex/errors.py
 aiokeydb/aiokeydb-py.code-workspace
 tests/private_*
 !tests/
+aiokeydb/v2/types/dev.py
