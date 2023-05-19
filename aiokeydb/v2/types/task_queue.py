@@ -569,6 +569,13 @@ class TaskQueue:
         """
         job_id = self.job_id(job_key)
         return await self._get_job_by_id(job_id)
+    
+    async def job_exists(self, job_key: str) -> bool:
+        """
+        Check if a job exists
+        """
+        job_id = self.job_id(job_key)
+        return await self.ctx.async_exists(job_id)
 
     async def _get_job_by_id(self, job_id):
         async with self._op_sem:
