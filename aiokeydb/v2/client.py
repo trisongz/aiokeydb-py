@@ -268,7 +268,7 @@ class KeyDBClientMeta(type):
         **config,
     ):
         if name in cls.sessions and overwrite is not True:
-            if verbose: logger.warning(f'Session {name} already exists')
+            if verbose and name != 'default': logger.warning(f'Session {name} already exists')
             return cls.sessions[name]
         
         session = cls._configure_session(

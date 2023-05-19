@@ -37,6 +37,23 @@ class CronJob(BaseModel):
     retries: typing.Optional[int] = None
     ttl: typing.Optional[int] = None
 
+class JobProgress(BaseModel):
+
+    """
+    Holds the progress of a job
+    """
+
+    total: int = 0
+    completed: int = 0
+
+    @property
+    def progress(self) -> float:
+        """
+        Returns the progress of a job as a float between 0.0 and 1.0
+        """
+        return 0.0 if self.total == 0 else self.completed / self.total
+
+
 class Job(BaseModel):
     """
     Main job class representing a run of a function.
@@ -96,6 +113,8 @@ class Job(BaseModel):
     meta: typing.Dict = Field(default_factory=dict)
     worker_id: typing.Optional[str] = None
     worker_name: typing.Optional[str] = None
+
+    job_progress: typing.Optional[JobProgress] = Field(default_factory = JobProgress)
 
     def __repr__(self):
         kwargs = ", ".join(
@@ -225,11 +244,20 @@ class Job(BaseModel):
         Returns the duration of the job in ms.
         """
         for kind in {
-            'running', 'total', 'start', 'process', 'queued'
+            'total', 'process', 'start', 'running', 'queued'
         }:
             if duration := self.duration(kind):
                 return duration
-        return 0
+        
+        # durations = []
+        # for kind in {
+        #     'running', 'start', 'queued'
+        # }:
+        #     if duration := self.duration(kind):
+        #         durations.append(duration)
+        #         # return duration
+        # return max(durations, default=0)
+        # return 0
 
 
     def _duration(self, a, b):
@@ -246,7 +274,8 @@ class Job(BaseModel):
         current = now()
         return (self.status == JobStatus.ACTIVE) and (
             seconds(current - self.started) > \
-                (self.timeout if self.timeout is not None else 1800.0)
+                # (self.timeout if self.timeout is not None else 1800.0)
+                (self.timeout if self.timeout is not None else 7200.0)
             or (
                 self.heartbeat and \
                     seconds(current - self.touched) > self.heartbeat
@@ -298,6 +327,30 @@ class Job(BaseModel):
         for k, v in kwargs.items():
             setattr(self, k, v)
         await self.queue.update(self)
+    
+    async def set_progress(self, total: typing.Optional[int] = None, completed: typing.Optional[int] = None):
+        """
+        Sets the job's progress.
+        """
+        if total is not None:
+            self.job_progress.total = total
+        if completed is not None:
+            self.job_progress.completed = completed
+        await self.queue.update(self)
+    
+    async def incr_progress(self, incr: typing.Optional[int] = 1):
+        """
+        Increments the job's progress.
+        """
+        self.job_progress.completed += incr
+        await self.queue.update(self)
+
+    @property
+    def _progress(self) -> typing.Optional[float]:
+        """
+        Returns the job's progress as a float.
+        """
+        return self.job_progress.progress
 
     async def refresh(self, until_complete: int = None):
         """

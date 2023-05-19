@@ -314,13 +314,20 @@ class TaskQueue:
         self.silenced_functions.extend(functions)
         self.silenced_functions = list(set(self.silenced_functions))
 
-    def logger(self, job: 'Job' = None, kind: str = "enqueue"):
+    def logger(self, job: 'Job' = None, kind: str = "enqueue", job_id: typing.Optional[str] = None,):
         if job:
             return logger.bind(
                 job_id = job.id,
                 status = job.status,
                 worker_name = self._worker_name,
                 queue_name = getattr(job.queue, 'queue_name', None) or 'unknown queue',
+                kind = kind,
+            )
+        elif job_id:
+            return logger.bind(
+                job_id = job_id,
+                worker_name = self._worker_name,
+                queue_name = self.queue_name,
                 kind = kind,
             )
         else:
@@ -515,6 +522,38 @@ class TaskQueue:
                     else:
                         self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
         return swept
+    
+    async def sweep_job(self, job_id: str, worker_id: typing.Optional[str] = None):
+        """
+        Sweep a single job.
+        """
+        job = await self._get_job_by_id(job_id)
+        if not job:
+            self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
+        elif job.status != JobStatus.ACTIVE or job.stuck:
+            await job.finish(JobStatus.ABORTED, error="swept")
+            if job.function in self.silenced_functions:
+                pass
+            elif self.verbose_results:
+                self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job.result}")
+            elif self.truncate_logs:
+                job_result = (
+                    f'{str(job.result)[:self.logging_max_length]}...'
+                    if self.logging_max_length
+                    else str(job.result)
+                )
+                self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
+            else:
+                self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
+            
+        active_key = self.active_key if worker_id is None else f"{self.active_key}:{worker_id}"
+        incomplete_key = self.incomplete_key if worker_id is None else f"{self.incomplete_key}:{worker_id}"
+        async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+            await (
+                pipe.lrem(active_key, 0, job_id)
+                .zrem(incomplete_key, job_id)
+                .execute()
+            )
 
     async def listen(self, job_keys: typing.List[str], callback: typing.Callable, timeout: int = 10):
         """
