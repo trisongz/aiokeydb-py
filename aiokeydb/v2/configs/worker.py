@@ -423,7 +423,10 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         if _fx is not None:
             name = name or _fx.__name__
-            self.tasks.functions.append(_fx)
+            if name:
+                self.tasks.functions.append((name, _fx))
+            else:
+                self.tasks.functions.append(_fx)
             if verbose:
                 logger.info(f"Registered function {name}: {_fx}")
             if silenced is True: self.tasks.silenced_functions.append(name)
