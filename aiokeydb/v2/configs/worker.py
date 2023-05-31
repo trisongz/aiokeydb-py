@@ -430,10 +430,15 @@ class KeyDBWorkerSettings(BaseSettings):
             return
         
         def decorator(func: Callable):
-            self.tasks.functions.append(func)
+            nonlocal name
+            func_name = name or func.__name__
+            if name:
+                self.tasks.functions.append((name, func))
+            else:
+                self.tasks.functions.append(func)
             if verbose:
-                logger.info(f"Registered function {func.__name__}")
-            if silenced is True: self.tasks.silenced_functions.append(func.__name__)
+                logger.info(f"Registered function {func_name}")
+            if silenced is True: self.tasks.silenced_functions.append(func_name)
             return func
         
         return decorator

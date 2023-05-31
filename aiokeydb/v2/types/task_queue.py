@@ -342,8 +342,8 @@ class TaskQueue:
         return f"queue:{self.queue_name}:{self.settings.worker.job_prefix}"
 
     def job_id(self, job_key):
-        return f"{self.job_id_prefix}:{job_key}"
-        # return f"queue:{self.queue_name}:{self.settings.worker.job_prefix}:{job_key}"
+        return f"{self.job_id_prefix}:{job_key}" if \
+            self.job_id_prefix not in job_key else job_key
     
     def register_before_enqueue(self, callback):
         self._before_enqueues[id(callback)] = callback
@@ -523,17 +523,21 @@ class TaskQueue:
                         self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
         return swept
     
-    async def sweep_job(self, job_id: str, worker_id: typing.Optional[str] = None):
+    async def sweep_job(self, job_id: str, worker_id: typing.Optional[str] = None, verbose: typing.Optional[bool] = None):
+        # sourcery skip: low-code-quality
         """
         Sweep a single job.
         """
         job = await self._get_job_by_id(job_id)
+        verbose = verbose if verbose is not None else self.verbose_results
         if not job:
-            self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
+            if verbose: self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
         elif job.status != JobStatus.ACTIVE or job.stuck:
-            await job.finish(JobStatus.ABORTED, error="swept")
-            if job.function in self.silenced_functions:
+            await job.finish(JobStatus.ABORTED, error="swept")  
+            if job.function in self.silenced_functions: 
                 pass
+            elif verbose is False:
+                self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
             elif self.verbose_results:
                 self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job.result}")
             elif self.truncate_logs:
@@ -543,9 +547,7 @@ class TaskQueue:
                     else str(job.result)
                 )
                 self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
-            else:
-                self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
-            
+                
         active_key = self.active_key if worker_id is None else f"{self.active_key}:{worker_id}"
         incomplete_key = self.incomplete_key if worker_id is None else f"{self.incomplete_key}:{worker_id}"
         async with self.ctx.async_client.pipeline(transaction = True) as pipe:

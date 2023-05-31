@@ -118,6 +118,17 @@ def _get_jobkey_func():
 def get_default_job_key():
     return _get_jobkey_func()
 
+def isclassmethod(method):
+    bound_to = getattr(method, '__self__', None)
+    if not isinstance(bound_to, type):
+        # must be bound to a class
+        return False
+    name = method.__name__
+    for cls in bound_to.__mro__:
+        descriptor = vars(cls).get(name)
+        if descriptor is not None:
+            return isinstance(descriptor, classmethod)
+    return False
 
 def ensure_coroutine_function(func):
     if asyncio.iscoroutinefunction(func):
