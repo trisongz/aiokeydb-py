@@ -244,7 +244,7 @@ class Job(BaseModel):
         Returns the duration of the job in ms.
         """
         for kind in {
-            'total', 'process', 'start', 'running', 'queued'
+            'process', 'total', 'start', 'running', 'queued'
         }:
             if duration := self.duration(kind):
                 return duration
