@@ -51,6 +51,7 @@ class KeyDBClientMeta(type):
     _ctx: typing.Type[KeyDBSession] = None
     _session: typing.Type[KeyDBSession] = None
     _encoder: typing.Type[Encoder] = None
+    verbose: typing.Optional[bool] = True
 
     def get_settings(cls, **kwargs):
         return cls.settings
@@ -135,7 +136,7 @@ class KeyDBClientMeta(type):
         decode_responses: typing.Optional[bool] = None,
         serializer: typing.Optional[typing.Any] = None,
         loop: asyncio.AbstractEventLoop = None,
-        verbose: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = None,
 
         **config,
     ) -> ClientPools:
@@ -145,6 +146,7 @@ class KeyDBClientMeta(type):
         if uri.key in cls.pools and loop is None:
             return cls.pools[uri.key]
 
+        verbose = verbose if verbose is not None else cls.verbose
         connection_kwargs = connection_kwargs or {}
         aconnection_kwargs = aconnection_kwargs or {}
         decode_responses = decode_responses if decode_responses is not None else \
@@ -197,13 +199,15 @@ class KeyDBClientMeta(type):
         encoder: typing.Optional[typing.Any] = None,
         serializer: typing.Optional[typing.Any] = None,
         # decode_responses: typing.Optional[bool] = None,
-        verbose: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = None,
         loop: asyncio.AbstractEventLoop = None,
         **kwargs,
     ) -> KeyDBSession:
         """
         Configures a new session
         """
+
+        verbose = verbose if verbose is not None else cls.verbose
         uri: KeyDBUri = cls.settings.create_uri(
             name = name,
             uri = uri,
@@ -264,9 +268,11 @@ class KeyDBClientMeta(type):
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
         overwrite: typing.Optional[bool] = None,
-        verbose: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = None,
         **config,
     ):
+        
+        verbose = verbose if verbose is not None else cls.verbose
         if name in cls.sessions and overwrite is not True:
             if verbose and name != 'default': logger.warning(f'Session {name} already exists')
             return cls.sessions[name]
@@ -297,13 +303,15 @@ class KeyDBClientMeta(type):
         session: KeyDBSession,
         overwrite: bool = False,
         set_current: bool = False,
-        verbose: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = None,
         # raise_errors: typing.Optional[bool] = True,
         **kwargs
     ):
         """
         Adds a session to the client.
         """
+
+        verbose = verbose if verbose is not None else cls.verbose
         if not isinstance(session, KeyDBSession):
             raise TypeError('Session must be an instance of KeyDBSession')
         if session.name in cls.sessions and not overwrite:
@@ -322,7 +330,7 @@ class KeyDBClientMeta(type):
         set_current: bool = False,
         cache_enabled: typing.Optional[bool] = None,
         _decode_responses: typing.Optional[bool] = None,
-        verbose: typing.Optional[bool] = True,
+        verbose: typing.Optional[bool] = None,
         **kwargs,
     ):
         """
@@ -330,8 +338,10 @@ class KeyDBClientMeta(type):
         - used in conjunction with aiokeydb.queues.TaskQueue
         - does not explicitly set the serializer.
         """
+
+        verbose = verbose if verbose is not None else cls.verbose
         if name in cls.sessions and not overwrite:
-            if verbose: logger.warning(f'Session {name} already exists')
+            if cls.is_leader_process and verbose: logger.warning(f'Session {name} already exists')
             return cls.sessions[name]
         
         decode_responses = kwargs.pop('decode_responses', _decode_responses)

@@ -372,6 +372,7 @@ class TaskQueue:
         # del pipe
 
     def serialize(self, job: Job):
+        # logger.warning(f"Serializing job: {job}")
         return self.serializer.dumps(job.to_dict())
 
     def deserialize(self, job_bytes: bytes):
