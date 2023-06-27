@@ -268,7 +268,7 @@ class Worker:
             default_kwargs = kwargs.pop('default_kwargs', {})
             if default_kwargs: kwargs.update(default_kwargs)
 
-            kwargs["key"] = f"cron:{function}" if kwargs.pop("unique") else None
+            kwargs["key"] = self.queue.job_id(f"cron:{function}") if kwargs.pop("unique") else None
             scheduled = croniter(kwargs.pop("cron"), seconds(now())).get_next()
             await self.queue.enqueue(
                 function,
