@@ -135,8 +135,9 @@ class Worker:
         for job in self.cron_jobs:
             if not croniter.is_valid(job.cron):
                 raise ValueError(f"Cron is invalid {job.cron}")
+            self.functions[job.function_name] = job.function
             # functions.add(job.function)
-            self.functions[job.function.__qualname__] = job.function
+            # self.functions[job.function.__qualname__] = job.function
             # self.logger(kind="startup").info(f"Added cron job {job.function.__qualname__} with cron {job.cron} to worker {self.name}.")
 
         for function in functions:
@@ -200,7 +201,7 @@ class Worker:
         # self.queue._worker_name = self.name
         self.queue._worker_name = self._worker_name
         self.logger(kind = "startup").info(
-            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Worker Attributes: {self.worker_attributes} ')
+            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Serializer: {self.queue.serializer} | Worker Attributes: {self.worker_attributes} ')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -259,13 +260,19 @@ class Worker:
     async def schedule(self, lock=1):
         for cron_job in self.cron_jobs:
             kwargs = cron_job.__dict__.copy()
-            function = kwargs.pop("function").__qualname__
+            # function = kwargs.pop("function").__qualname__
+            _ = kwargs.pop("function")
+            _ = kwargs.pop("cron_name")
+            function = cron_job.function_name
+            # function = kwargs.pop("function").
+            default_kwargs = kwargs.pop('default_kwargs', {})
+            if default_kwargs: kwargs.update(default_kwargs)
+
             kwargs["key"] = f"cron:{function}" if kwargs.pop("unique") else None
             scheduled = croniter(kwargs.pop("cron"), seconds(now())).get_next()
-
             await self.queue.enqueue(
                 function,
-                scheduled=int(scheduled),
+                scheduled = int(scheduled),
                 **{k: v for k, v in kwargs.items() if v is not None},
             )
 
@@ -298,7 +305,7 @@ class Worker:
                 except (Exception, asyncio.CancelledError):
                     if self.event.is_set():
                         return
-                    get_and_log_exc()
+                    get_and_log_exc(func = func)
 
                 await asyncio.sleep(sleep)
 
@@ -388,7 +395,7 @@ class Worker:
             if job and not self.job_task_contexts.get(job, {}).get("aborted"):
                 await job.retry("cancelled")
         except Exception:
-            error = get_and_log_exc()
+            error = get_and_log_exc(job = job)
 
             if job:
                 if job.attempts >= job.retries:
@@ -399,7 +406,7 @@ class Worker:
                 self.job_task_contexts.pop(job, None)
                 try: await self._after_process(context)
                 except (Exception, asyncio.CancelledError): 
-                    get_and_log_exc()
+                    get_and_log_exc(job = job)
 
     async def process_broadcast(self):
         # await self.heartbeat(self.heartbeat_ttl)

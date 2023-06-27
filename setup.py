@@ -18,7 +18,7 @@ requirements = [
     'typing-extensions; python_version<"3.8"',
     "async-timeout>=4.0.2",
     'lazyops>=0.2.38',
-    'redis',
+    'redis<5.0.0',
     "pydantic",
     "anyio",
     "croniter",

@@ -32,10 +32,19 @@ class CronJob(BaseModel):
     function: typing.Callable
     cron: str
     unique: bool = True
+    cron_name: typing.Optional[str] = None
     timeout: typing.Optional[int] = None
     heartbeat: typing.Optional[int] = None
     retries: typing.Optional[int] = None
-    ttl: typing.Optional[int] = None
+    ttl: typing.Optional[int] = Field(default_factory = settings.get_default_job_timeout)
+    default_kwargs: typing.Optional[dict] = None
+
+    @property
+    def function_name(self) -> str:
+        """
+        Returns the name of the function
+        """
+        return self.cron_name or self.function.__qualname__
 
 class JobProgress(BaseModel):
 

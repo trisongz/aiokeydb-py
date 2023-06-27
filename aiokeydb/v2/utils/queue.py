@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import time
 import uuid
@@ -17,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 _NodeName: str = None
 _ThreadPool: futures.ThreadPoolExecutor = None
+
+if typing.TYPE_CHECKING:
+    from aiokeydb.v2.types.jobs import Job
 
 def get_hostname() -> str:
     """
@@ -56,9 +61,21 @@ async def run_in_executor(ctx: typing.Dict[str, typing.Any], func: typing.Callab
     return await loop.run_in_executor(ctx['pool'], blocking)
 
 
-def get_and_log_exc():
+def get_func_name(func: typing.Union[str, typing.Callable]) -> str:
+    """
+    Returns the function name
+    """
+    return func.__name__ if callable(func) else func
+
+def get_and_log_exc(
+    job: typing.Optional['Job'] = None, 
+    func: typing.Optional[typing.Union[str, typing.Callable]] = None
+):
     error = traceback.format_exc()
-    logger.error(f'node={get_hostname()}, {error}')
+    err_msg = f'node={get_hostname()}, {error}'
+    if func: err_msg = f'func={get_func_name(func)}, {err_msg}'
+    elif job: err_msg = f'job={job.short_repr}, {err_msg}'
+    logger.error(err_msg)
     return error
 
 

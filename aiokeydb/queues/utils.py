@@ -63,6 +63,7 @@ async def run_in_executor(ctx: typing.Dict[str, typing.Any], func: typing.Callab
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(ctx['pool'], blocking)
 
+
 def get_and_log_exc():
     error = traceback.format_exc()
     logger.error(f'node={get_hostname()}, {error}')

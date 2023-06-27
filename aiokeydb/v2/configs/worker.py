@@ -32,6 +32,33 @@ class WorkerTasks(object):
     silenced_functions: List[str] = []
     queue_func: Union[Callable, 'TaskQueue'] = None
 
+
+_schedule_fmt = {
+    'minutes': '*/{value} * * * *',
+    'hours': '* */{value} * * *',
+    'days': '* * */{value} * *',
+    'weeks': '* * * */{value} *',
+}
+
+def validate_cron_schedule(cron_schedule: str) -> str:
+    """
+    Validates a cron schedule and tries to fix it if it's invalid
+    super basic, but it works
+    """
+    import croniter
+    if croniter.croniter.is_valid(cron_schedule):
+        return cron_schedule
+    cron_schedule = cron_schedule.lower()
+    if 'every' in cron_schedule:
+        cron_schedule = cron_schedule.replace('every', '').strip()
+    value, unit = cron_schedule.split(' ')
+    if not unit.endswith('s'): unit += 's'
+    return _schedule_fmt[unit].format(value=value)
+
+
+
+
+
 class KeyDBWorkerSettings(BaseSettings):
     """
     KeyDB Worker Settings
@@ -511,8 +538,10 @@ class KeyDBWorkerSettings(BaseSettings):
         self,
         schedule: Optional[Union[Dict, List, str]] = None,
         _fx: Optional[Callable] = None,
+        name: Optional[str] = None,
         verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
+        default_kwargs: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -522,15 +551,16 @@ class KeyDBWorkerSettings(BaseSettings):
         }
         """
         if verbose is None: verbose = self.debug_enabled
+        if schedule and isinstance(schedule, str): schedule = validate_cron_schedule(schedule)
         if _fx is not None:
-            cron = {'function': _fx, **kwargs, 'cron': schedule, 'silenced': silenced}
+            cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, **kwargs}
             self.tasks.cronjobs.append(cron)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return
         
         def decorator(func: Callable):
             nonlocal schedule
-            cron = {'function': func, **kwargs, 'cron': schedule, 'silenced': silenced}
+            cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced,  **kwargs}
             self.tasks.cronjobs.append(cron)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return func
