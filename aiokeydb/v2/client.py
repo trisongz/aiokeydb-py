@@ -39,7 +39,6 @@ from aiokeydb.v2.serializers import SerializerType, BaseSerializer
 
 logger = logging.getLogger(__name__)
 
-
 class KeyDBClientMeta(type):
 
     current: str = None

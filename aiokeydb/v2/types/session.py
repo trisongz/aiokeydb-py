@@ -21,7 +21,9 @@ from aiokeydb.v2.exceptions import (
 from aiokeydb.v2.types import KeyDBUri, ENOVAL
 from aiokeydb.v2.configs import KeyDBSettings, settings as default_settings
 from aiokeydb.v2.utils import full_name, args_to_key
+from aiokeydb.v2.utils.helpers import create_retryable_client
 from aiokeydb.v2.serializers import BaseSerializer
+
 
 from inspect import iscoroutinefunction
 
@@ -138,20 +140,86 @@ class KeyDBSession:
         
         # logger.info(f'Encoder: {self.encoder} | Serializer: {self.serializer}')
 
+    @classmethod
+    def _get_client_class(
+        cls, 
+        settings: KeyDBSettings,
+        retry_client_enabled: typing.Optional[bool] = None,
+        retry_client_max_attempts: typing.Optional[int] = None,
+        retry_client_max_delay: typing.Optional[int] = None,
+        retry_client_logging_level: typing.Optional[int] = None,
+        **kwargs
+    ) -> typing.Type[KeyDB]:
+        """
+        Returns the client class
+        """
+        retry_client_enabled = retry_client_enabled if retry_client_enabled is not None else settings.retry_client_enabled
+        if not retry_client_enabled: return KeyDB
+        retry_client_max_attempts = retry_client_max_attempts if retry_client_max_attempts is not None else settings.retry_client_max_attempts
+        retry_client_max_delay = retry_client_max_delay if retry_client_max_delay is not None else settings.retry_client_max_delay
+        retry_client_logging_level = retry_client_logging_level if retry_client_logging_level is not None else settings.retry_client_logging_level
+        return create_retryable_client(
+            KeyDB,
+            max_attempts = retry_client_max_attempts,
+            max_delay = retry_client_max_delay,
+            logging_level = retry_client_logging_level,
+            **kwargs
+        )
+    
+
+    @classmethod
+    def _get_async_client_class(
+        cls, 
+        settings: KeyDBSettings,
+        retry_client_enabled: typing.Optional[bool] = None,
+        retry_client_max_attempts: typing.Optional[int] = None,
+        retry_client_max_delay: typing.Optional[int] = None,
+        retry_client_logging_level: typing.Optional[int] = None,
+        **kwargs
+    ) -> typing.Type[AsyncKeyDB]:
+        """
+        Returns the client class
+        """
+        retry_client_enabled = retry_client_enabled if retry_client_enabled is not None else settings.retry_client_enabled
+        if not retry_client_enabled: return AsyncKeyDB
+        retry_client_max_attempts = retry_client_max_attempts if retry_client_max_attempts is not None else settings.retry_client_max_attempts
+        retry_client_max_delay = retry_client_max_delay if retry_client_max_delay is not None else settings.retry_client_max_delay
+        retry_client_logging_level = retry_client_logging_level if retry_client_logging_level is not None else settings.retry_client_logging_level
+        return create_retryable_client(
+            AsyncKeyDB,
+            max_attempts = retry_client_max_attempts,
+            max_delay = retry_client_max_delay,
+            logging_level = retry_client_logging_level,
+            **kwargs
+        )
+    
+
     @property
     def client(self) -> KeyDB:
         if self.state.client is None:
-            self.state.client = KeyDB(
+            self.state.client = self._get_client_class(
+                self.settings,
+                **self.config,
+            )(
                 connection_pool = self.client_pools.pool,
             )
+            # self.state.client = KeyDB(
+            #     connection_pool = self.client_pools.pool,
+            # )
         return self.state.client
     
     @property
     def async_client(self) -> AsyncKeyDB:
         if self.state.async_client is None:
-            self.state.async_client = AsyncKeyDB(
+            self.state.async_client = self._get_async_client_class(
+                self.settings,
+                **self.config,
+            )(
                 connection_pool = self.client_pools.apool,
             )
+            # self.state.async_client = AsyncKeyDB(
+            #     connection_pool = self.client_pools.apool,
+            # )
         return self.state.async_client
     
     @property

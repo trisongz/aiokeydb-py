@@ -22,6 +22,7 @@ requirements = [
     "pydantic",
     "anyio",
     "croniter",
+    "tenacity",
     # "hiredis",
 ]
 

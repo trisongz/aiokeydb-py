@@ -98,7 +98,12 @@ class KeyDBSettings(BaseSettings):
     retry_on_connection_reset_error: Optional[bool] = True
     retry_on_response_error: Optional[bool] = True
     retry_enabled: Optional[bool] = True
-    
+
+    retry_client_enabled: Optional[bool] = True
+    retry_client_max_attempts: Optional[int] = 15
+    retry_client_max_delay: Optional[int] = 60
+    retry_client_logging_level: Optional[int] = logging.WARNING
+
     single_connection_client: Optional[bool] = False
     health_check_interval: Optional[int] = 15
 
