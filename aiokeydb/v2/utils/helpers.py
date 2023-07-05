@@ -76,6 +76,7 @@ def create_retryable_client(
                 redis_exceptions.AuthorizationError,
                 redis_exceptions.InvalidResponse,
                 redis_exceptions.ResponseError,
+                redis_exceptions.NoScriptError,
             )
         )
     )
