@@ -619,6 +619,16 @@ class Worker:
             name = name, _fx = _fx, verbose = verbose, silenced = silenced, **kwargs
         )
     
+    @staticmethod
+    def add_function_to_silenced(
+        name: str,
+        **kwargs
+    ):
+        """
+        Add a function to the silenced functions list.
+        """
+        default_settings.worker.add_function_to_silenced(name = name, **kwargs)
+    
 
     @staticmethod
     def add_cronjob(        

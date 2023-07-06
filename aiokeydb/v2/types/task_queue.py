@@ -570,7 +570,7 @@ class TaskQueue:
         callback: callback function, if it returns truthy, break
         timeout: if timeout is truthy, wait for timeout seconds
         """
-        pubsub = self.ctx.async_client.pubsub()
+        pubsub = self.ctx.async_client.pubsub(retryable=True)
         
         job_ids = [self.job_id(job_key) for job_key in job_keys]
         await pubsub.subscribe(*job_ids)
@@ -645,7 +645,7 @@ class TaskQueue:
         Abort a job.
         """
         async with self._op_sem:
-            async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+            async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
             # async with self.pipeline(transaction = True) as pipe:
                 dequeued, *_ = await (
                     pipe.lrem(job.queued_key, 0, job.id)
@@ -676,7 +676,7 @@ class TaskQueue:
         next_retry_delay = job.next_retry_delay()
 
         # async with self.pipeline(transaction = True) as pipe:
-        async with self.ctx.async_client.pipeline(transaction=True) as pipe:
+        async with self.ctx.async_client.pipeline(transaction=True, retryable = True) as pipe:
             pipe = pipe.lrem(job.active_key, 1, job_id)
             pipe = pipe.lrem(job.queued_key, 1, job_id)
             if next_retry_delay:
@@ -711,7 +711,7 @@ class TaskQueue:
         if status == JobStatus.COMPLETE:
             job.progress = 1.0
 
-        async with self.ctx.async_client.pipeline(transaction=True) as pipe:
+        async with self.ctx.async_client.pipeline(transaction=True, retryable = True) as pipe:
         # async with self.pipeline(transaction = True) as pipe:
             pipe = pipe.lrem(job.active_key, 1, job_id).zrem(job.incomplete_key, job_id)
             if job.ttl > 0:
@@ -1507,7 +1507,7 @@ class TaskQueue:
         stats = await self.prepare_worker_metrics()
         current = now()
         # async with self.pipeline(transaction = True) as pipe:
-        async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+        async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
             key = self.create_namespace(f"stats:{self.uuid}")
             await (
                 pipe.setex(key, ttl, json.dumps(stats))
@@ -1530,7 +1530,7 @@ class TaskQueue:
         current = now()
         worker_attributes = worker_attributes or {}
         heartbeat_ttl = heartbeat_ttl or self.heartbeat_ttl
-        async with self.ctx.async_client.pipeline(transaction = True) as pipe:
+        async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
         # async with self.pipeline(transaction = True) as pipe:
             key = self.create_namespace(f"worker:attr:{worker_id}")
             await (

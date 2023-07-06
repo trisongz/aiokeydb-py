@@ -7,6 +7,7 @@ from typing import Optional, Union, Tuple, Type, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from aiokeydb.v2.core import KeyDB, AsyncKeyDB
+    from tenacity import WrappedFn
 
 
 logger = logging.getLogger(__name__)
@@ -34,26 +35,19 @@ class retry_if_type(retry_if_exception):
             lambda e: isinstance(e, exception_types) and not isinstance(e, excluded_types)
         )
 
-def create_retryable_client(
-    client: Type[Union[KeyDB, AsyncKeyDB]],
-
+def get_retryable_wrapper(  
     max_attempts: int = 15,
     max_delay: int = 60,
     logging_level: int = logging.DEBUG,
-
-    verbose: Optional[bool] = False,
-    **kwargs
-) -> Type[Union[KeyDB, AsyncKeyDB]]:
+    **kwargs,
+) -> 'WrappedFn':
+    
     """
-    Creates a retryable client
+    Creates a retryable decorator
     """
-    if hasattr(client, '_is_retryable_wrapped'): return client
-
     from aiokeydb import exceptions as aiokeydb_exceptions
     from redis import exceptions as redis_exceptions
-
-    
-    decorator = retry(
+    return retry(
         wait = wait_exponential(multiplier = 0.5, min = 1, max = max_attempts),
         stop = stop_after_delay(max_delay),
         before_sleep = before_sleep_log(logger, logging_level),
@@ -81,6 +75,27 @@ def create_retryable_client(
         )
     )
 
+
+def create_retryable_client(
+    client: Type[Union[KeyDB, AsyncKeyDB]],
+
+    max_attempts: int = 15,
+    max_delay: int = 60,
+    logging_level: int = logging.DEBUG,
+
+    verbose: Optional[bool] = False,
+    **kwargs
+) -> Type[Union[KeyDB, AsyncKeyDB]]:
+    """
+    Creates a retryable client
+    """
+    if hasattr(client, '_is_retryable_wrapped'): return client
+    decorator = get_retryable_wrapper(
+        max_attempts = max_attempts,
+        max_delay = max_delay,
+        logging_level = logging_level,
+        **kwargs
+    )
     for attr in dir(client):
         if attr.startswith('_'): continue
         if attr in _excluded_funcs: continue

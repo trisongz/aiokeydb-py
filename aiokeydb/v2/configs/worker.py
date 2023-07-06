@@ -473,6 +473,18 @@ class KeyDBWorkerSettings(BaseSettings):
         
         return decorator
     
+    def add_function_to_silenced(
+        self,
+        name: str,
+        **kwargs
+    ):
+        """
+        Adds a function to the silenced functions
+        """
+        if name not in self.tasks.silenced_functions:
+            self.tasks.silenced_functions.append(name)
+        
+
     def set_queue_func(
         self,
         queue_func: Union[Callable, 'TaskQueue'],
