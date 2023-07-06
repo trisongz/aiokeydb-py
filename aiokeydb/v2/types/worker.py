@@ -149,6 +149,14 @@ class Worker:
     @property
     def _worker_name(self):
         return f"{self.worker_host}.{self.name}.{self.worker_pid}"
+    
+    @property
+    def _is_ctx_retryable(self) -> bool:
+        """
+        Returns whether the context is retryable.
+        """
+        return hasattr(self.queue.ctx.async_client, "_is_retryable_wrapped")
+
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue"):
         if job:
@@ -199,7 +207,7 @@ class Worker:
         # self.queue._worker_name = self.name
         self.queue._worker_name = self._worker_name
         self.logger(kind = "startup").info(
-            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Serializer: {self.queue.serializer} | Worker Attributes: {self.worker_attributes} ')
+            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Serializer: {self.queue.serializer} | Worker Attributes: {self.worker_attributes} | Retryable: {self._is_ctx_retryable}')
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
