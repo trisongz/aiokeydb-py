@@ -188,10 +188,7 @@ class TaskQueue:
 
         self.client_mode = client_mode
         self.max_concurrency = max_concurrency or self.settings.worker.max_concurrency
-        self.max_broadcast_concurrency = max_broadcast_concurrency or self.settings.worker.max_broadcast_concurrency
-        if not self.max_broadcast_concurrency:
-            # Set as fallback
-            self.max_broadcast_concurrency = 3
+        self.max_broadcast_concurrency = max_broadcast_concurrency or self.settings.worker.max_broadcast_concurrency or 3
         
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
         # self.management_url = management_url if management_url is not None else self.settings.worker.management_url
@@ -303,6 +300,13 @@ class TaskQueue:
     @lazyproperty
     def db_id(self):
         return self.ctx.db_id
+    
+    @property
+    def _should_debug_log(self):
+        """
+        Returns whether the queue should debug log.
+        """
+        return self.debug_enabled and self.is_leader_process
 
     def _set_silenced_functions(self):
 
@@ -408,18 +412,18 @@ class TaskQueue:
             curr_max_connections
         )
         curr_ulimits = get_ulimits()
-        if curr_ulimits < new_max_connections and self.is_leader_process:
+        if curr_ulimits < new_max_connections and self._should_debug_log:
             logger.debug(f'The maximum number of concurrent connections may not be supported as ulimits: {curr_ulimits} < desired max connections: {new_max_connections}')
 
-        if self.is_leader_process: logger.info(f'Configuring Server: Current Max Connections: {curr_max_connections}, Current Connected: {curr_connected}, Min Connections: {min_connections} -> New Max: {new_max_connections}')
+        if self._should_debug_log: logger.info(f'Configuring Server: Current Max Connections: {curr_max_connections}, Current Connected: {curr_connected}, Min Connections: {min_connections} -> New Max: {new_max_connections}')
         if new_max_connections > curr_max_connections:
             try:
                 await self.ctx.config_set('maxclients', new_max_connections)
                 info = await self.ctx.async_info()
                 new_set_max_connections = info['maxclients']
-                if self.is_leader_process: logger.debug(f'New Max Connections: {new_set_max_connections}')
+                if self._should_debug_log: logger.debug(f'New Max Connections: {new_set_max_connections}')
             except Exception as e:
-                if self.debug_enabled and self.is_leader_process:
+                if self._should_debug_log:
                     logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
         # logger.info(f'Pool Class: {self.ctx.client_pools.apool.__class__.__name__}')
 
@@ -857,8 +861,8 @@ class TaskQueue:
             raise ValueError(f"Invalid job type {type(job_or_func)}")
             
 
-        if job.queue and job.queue.queue_name != self.queue_name:
-            raise ValueError(f"Job {job} registered to a different queue")
+        # if job.queue and job.queue.queue_name != self.queue_name:
+        #     raise ValueError(f"Job {job} registered to a different queue")
 
         if not self._enqueue_script:
             self._enqueue_script = self.ctx.async_client.register_script(

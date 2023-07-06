@@ -79,9 +79,7 @@ class Worker:
         self.worker_host = get_hostname()
         self.name = name if name is not None else (self.settings.worker.name or self.worker_host)
         self.concurrency = concurrency if concurrency is not None else self.settings.worker.concurrency
-        self.broadcast_concurrency = broadcast_concurrency if broadcast_concurrency is not None else self.settings.worker.max_broadcast_concurrency
-        if not self.broadcast_concurrency:
-            self.broadcast_concurrency = 3
+        self.broadcast_concurrency = (broadcast_concurrency if broadcast_concurrency is not None else self.settings.worker.max_broadcast_concurrency) or 3
         
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
