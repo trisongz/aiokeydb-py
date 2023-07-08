@@ -399,6 +399,9 @@ class TaskQueue:
         self.ctx.config['transaction'] = True
         info = await self.ctx.async_info()
         await self.prepare_for_broadcast()
+        if 'maxclients' not in info:
+            if self._should_debug_log: logger.warning(f'Unable to configure the maxclients to {self.max_concurrency}: maxclients not supported: {info}')
+            return
 
         # Each Worker spawns a connection
         min_connections = ((self.num_workers or 1) * (self.max_concurrency + self.max_broadcast_concurrency)) * 10
