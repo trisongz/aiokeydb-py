@@ -1190,8 +1190,11 @@ class TaskQueue:
         jobs: typing.List[Job] = await asyncio.gather(*[self.job(job_key) for job_key in job_keys])
 
         results = []
-        for job in jobs:
-            if job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
+        for job, job_key in zip(jobs, job_keys):
+            if job is None:
+                if not return_exceptions: raise ValueError(f"Job {job_key} not found")
+                results.append(None)
+            elif job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
                 exc = JobError(job)
                 if not return_exceptions: raise exc
                 results.append(exc)
@@ -1315,8 +1318,12 @@ class TaskQueue:
         await asyncio.wait_for(task, timeout=timeout)
         jobs: typing.List[Job] = await asyncio.gather(*[self.job(job_key) for job_key in job_dict])
         results = {}
-        for job in jobs:
-            if job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
+        
+        for job, job_key in zip(jobs, job_dict):
+            if job is None:
+                if not return_exceptions: raise ValueError(f"Job {job_key} not found")
+                results[job_dict[job_key]] = None
+            elif job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
                 exc = JobError(job)
                 if not return_exceptions: raise exc
                 results[job_dict[job.key]] = exc
@@ -1386,8 +1393,11 @@ class TaskQueue:
         await asyncio.wait_for(task, timeout=timeout)
         jobs: typing.List[Job] = await asyncio.gather(*[self.job(job_key) for job_key in job_keys])
         results = []
-        for job in jobs:
-            if job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
+        for job, job_key in zip(jobs, job_keys):
+            if job is None:
+                if not return_exceptions: raise ValueError(f"Job {job_key} not found")
+                results.append(None)
+            elif job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
                 exc = JobError(job)
                 if not return_exceptions: raise exc
                 results.append(exc)
