@@ -3,6 +3,7 @@ import json
 import time
 import asyncio
 import typing
+import anyio
 import threading
 
 from contextlib import asynccontextmanager, suppress
@@ -1507,19 +1508,29 @@ class TaskQueue:
         return json.loads(queue_info) if queue_info else {}
 
     async def stats(self, ttl: int = 60):
-        stats = await self.prepare_worker_metrics()
-        current = now()
-        # async with self.pipeline(transaction = True) as pipe:
-        async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
-            key = self.create_namespace(f"stats:{self.uuid}")
-            await (
-                pipe.setex(key, ttl, json.dumps(stats))
-                .zremrangebyscore(self.stats_key, 0, current)
-                .zadd(self.stats_key, {key: current + millis(ttl)})
-                .expire(self.stats_key, ttl)
-                .execute()
-            )
-        return stats
+        """
+        Logs the current queue stats to keydb
+        """
+        try:
+            async with anyio.fail_after(10):
+                stats = await self.prepare_worker_metrics()
+                current = now()
+                # async with self.pipeline(transaction = True) as pipe:
+                async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
+                    key = self.create_namespace(f"stats:{self.uuid}")
+                    await (
+                        pipe.setex(key, ttl, json.dumps(stats))
+                        .zremrangebyscore(self.stats_key, 0, current)
+                        .zadd(self.stats_key, {key: current + millis(ttl)})
+                        .expire(self.stats_key, ttl)
+                        .execute()
+                    )
+                return stats
+        except TimeoutError as e:
+            logger.error(f"TimeoutError while logging stats: {e}")
+        except Exception as e:
+            logger.error(f"Error while logging stats: {e}")
+
     
     async def add_heartbeat(
         self, 

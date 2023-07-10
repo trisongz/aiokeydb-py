@@ -101,7 +101,7 @@ class Worker:
         self.after_process = after_process
         self.timers = {
             "schedule": 1,
-            "stats": 10,
+            "stats": 60,
             "sweep": 180,
             "abort": 1,
             "heartbeat": 5,
@@ -292,6 +292,7 @@ class Worker:
         """
         Send a heartbeat to the queue.
         """
+        # self.logger(kind = "scheduled").info(f"❤ Sending [{self.worker_id}] heartbeat to queue {self.queue_name}")
         await self.queue.add_heartbeat(
             worker_id = self.worker_id,
             worker_attributes = self.worker_attributes,
