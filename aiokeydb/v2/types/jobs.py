@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import enum
 import typing
-
+import datetime
 from aiokeydb.v2.types.base import BaseModel, lazyproperty, Field, validator
 from aiokeydb.v2.utils.queue import (
     get_default_job_key, 
@@ -61,6 +61,166 @@ class JobProgress(BaseModel):
         Returns the progress of a job as a float between 0.0 and 1.0
         """
         return 0.0 if self.total == 0 else self.completed / self.total
+
+
+class FunctionTracker(BaseModel):
+    """
+    Tracks the metrics for a job function
+    """
+    function: str
+    completed_durations: typing.List[float] = Field(default_factory=list)
+    failed_durations: typing.List[float] = Field(default_factory=list)
+    last_completed: typing.Optional[datetime.datetime] = None
+    last_failed: typing.Optional[datetime.datetime] = None
+
+    @property
+    def durations(self) -> typing.List[float]:
+        """
+        Returns the durations of a job function
+        """
+        return self.completed_durations + self.failed_durations
+    
+    @property
+    def failed(self) -> int:
+        """
+        Returns the number of failed jobs
+        """
+        return len(self.failed_durations)
+    
+    @property
+    def completed(self) -> int:
+        """
+        Returns the number of completed jobs
+        """
+        return len(self.completed_durations)
+
+    @property
+    def total_duration_ms(self) -> float:
+        """
+        Returns the total duration of a job function
+        in milliseconds
+        """
+        return sum(self.durations)
+    
+    @property
+    def total_duration(self) -> float:
+        """
+        Returns the total duration of a job function
+        in seconds
+        """
+        return self.total_duration_ms / 1000.0
+    
+    @property
+    def completed_duration_ms(self) -> float:
+        """
+        Returns the total duration of completed jobs
+        in milliseconds
+        """
+        return sum(self.completed_durations)
+    
+    @property
+    def completed_duration(self) -> float:
+        """
+        Returns the total duration of completed jobs
+        in seconds
+        """
+        return self.completed_duration_ms / 1000.0
+    
+    @property
+    def failed_duration_ms(self) -> float:
+        """
+        Returns the total duration of failed jobs
+        in milliseconds
+        """
+        return sum(self.failed_durations)
+    
+    @property
+    def failed_duration(self) -> float:
+        """
+        Returns the total duration of failed jobs
+        in seconds
+        """
+        return self.failed_duration_ms / 1000.0
+    
+    @property
+    def total(self) -> int:
+        """
+        Returns the total number of jobs
+        """
+        return self.completed + self.failed
+
+    @property
+    def average_duration_ms(self) -> float:
+        """
+        Returns the average duration of a job function
+        in milliseconds
+        """
+        return 0.0 if self.completed == 0 else self.completed_duration_ms / self.completed
+    
+    @property
+    def average_duration(self) -> float:
+        """
+        Returns the average duration of a job function
+        in seconds
+        """
+        return self.average_duration_ms / 1000.0
+    
+    @property
+    def success_rate(self) -> float:
+        """
+        Returns the success rate of a job function
+        """
+        return 0.0 if self.total == 0 else self.completed / self.total
+    
+    @property
+    def failure_rate(self) -> float:
+        """
+        Returns the failure rate of a job function
+        """
+        return 0.0 if self.total == 0 else self.failed / self.total
+    
+    def track_job(self, job: 'Job'):
+        """
+        Tracks the job in the function tracker
+        """
+        if job.status in UNSUCCESSFUL_TERMINAL_STATUSES:
+            self.failed_durations.append(job.job_duration)
+            self.last_failed = datetime.datetime.now(tz = datetime.timezone.utc)
+        elif job.status in TERMINAL_STATUSES:
+            self.completed_durations.append(job.job_duration)
+            self.last_completed = datetime.datetime.now(tz = datetime.timezone.utc)
+
+    def serialize(self) -> str:
+        """
+        Serializes the function tracker
+        """
+        return self.json()
+    
+    @classmethod
+    def deserialize(cls, data: str) -> 'FunctionTracker':
+        """
+        Deserializes the function tracker
+        """
+        return cls.parse_raw(data)
+    
+    @property
+    def data_dict(self) -> dict:
+        """
+        Returns the function tracker as a dictionary
+        """
+        return {
+            "function": self.function,
+            "total": self.total,
+            "completed": self.completed,
+            "failed": self.failed,
+            "total_duration": self.total_duration,
+            "average_duration": self.average_duration,
+            "success_rate": self.success_rate * 100,
+            "failure_rate": self.failure_rate * 100,
+            "last_completed": self.last_completed.isoformat() if self.last_completed else None,
+            "last_failed": self.last_failed.isoformat() if self.last_failed else None,
+        }
+
 
 
 class Job(BaseModel):

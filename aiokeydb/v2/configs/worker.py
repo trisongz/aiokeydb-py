@@ -30,6 +30,15 @@ class WorkerTasks(object):
     shutdown_funcs: Dict[str, Tuple[Union[Any, Callable], Dict]] = {}
 
     silenced_functions: List[str] = []
+    silenced_functions_by_stage: Dict[str, List[str]] = {
+        'enqueue': [],
+        'dequeue': [],
+        'process': [],
+        'finish': [],
+        'sweep': [],
+        'retry': [],
+        'abort': [],
+    }
     queue_func: Union[Callable, 'TaskQueue'] = None
 
 
@@ -95,6 +104,9 @@ class KeyDBWorkerSettings(BaseSettings):
     heartbeat_interval: Optional[int] = 20
     retry_on_timeout: Optional[bool] = True
     is_leader_process: Optional[bool] = None
+
+    function_tracker_enabled: Optional[bool] = False
+    function_tracker_ttl: Optional[int] = 60 * 60 * 24 * 7 # 7 days
 
     class Config:
         case_sensitive = False
@@ -458,6 +470,7 @@ class KeyDBWorkerSettings(BaseSettings):
         _fx: Optional[Callable] = None,
         verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
+        silenced_stages: Optional[List[str]] = None,
         **kwargs,
     ):
         """
@@ -479,9 +492,8 @@ class KeyDBWorkerSettings(BaseSettings):
                 self.tasks.functions.append(_fx)
             if verbose:
                 logger.info(f"Registered function {name}: {_fx}")
-            if silenced is True: 
-                self.add_function_to_silenced(name)
-                # self.tasks.silenced_functions.append(name)
+            if silenced is True or silenced_stages: 
+                self.add_function_to_silenced(name, silenced_stages = silenced_stages)
             return
         
         def decorator(func: Callable):
@@ -493,9 +505,8 @@ class KeyDBWorkerSettings(BaseSettings):
                 self.tasks.functions.append(func)
             if verbose:
                 logger.info(f"Registered function {func_name}")
-            if silenced is True: 
-                self.add_function_to_silenced(func_name)
-                # self.tasks.silenced_functions.append(func_name)
+            if silenced is True or silenced_stages: 
+                self.add_function_to_silenced(func_name, silenced_stages = silenced_stages)
             return func
         
         return decorator
@@ -503,14 +514,51 @@ class KeyDBWorkerSettings(BaseSettings):
     def add_function_to_silenced(
         self,
         name: str,
+        silenced_stages: Optional[List[str]] = None,
         **kwargs
     ):
         """
         Adds a function to the silenced functions
         """
-        if name not in self.tasks.silenced_functions:
-            self.tasks.silenced_functions.append(name)
+        if silenced_stages:
+            for stage in silenced_stages:
+                if stage not in self.tasks.silenced_functions_by_stage: continue
+                if name not in self.tasks.silenced_functions_by_stage[stage]:
+                    self.tasks.silenced_functions_by_stage[stage].append(name)
         
+        elif name not in self.tasks.silenced_functions:
+            self.tasks.silenced_functions.append(name)
+    
+    def is_silenced_function(
+        self,
+        name: str,
+        stage: Optional[str] = None,
+    ) -> bool:
+        """
+        Checks if a function is silenced
+        """
+        if name in self.tasks.silenced_functions: return True
+        if stage: return name in self.tasks.silenced_functions_by_stage.get(stage, [])
+        return False
+    
+    @property
+    def has_silenced_functions(self) -> bool:
+        """
+        Returns whether there are silenced functions
+        """
+        if self.tasks.silenced_functions: return True
+        return any(self.tasks.silenced_functions_by_stage.values())
+
+    @property
+    def silenced_function_dict(self) -> Dict[str, List[str]]:
+        """
+        Returns the silenced functions dict
+        """
+        return {
+            'global': self.tasks.silenced_functions,
+            **self.tasks.silenced_functions_by_stage,
+        }
+
 
     def set_queue_func(
         self,
@@ -540,6 +588,7 @@ class KeyDBWorkerSettings(BaseSettings):
         suppressed_exceptions: Optional[list] = None,
         failed_results: Optional[list] = None,
         queue_func: Optional[Union[Callable, 'TaskQueue']] = None,
+        silenced_stages: Optional[List[str]] = None,
         **kwargs,
     ):
         """
@@ -555,8 +604,7 @@ class KeyDBWorkerSettings(BaseSettings):
             self.tasks.functions.append(func)
             name = func.__name__
             if verbose: logger.info(f"Registered fallback function {name}")
-            # if silenced is True: self.tasks.silenced_functions.append(name)
-            if silenced is True: self.add_function_to_silenced(name)
+            if silenced is True or silenced_stages: self.add_function_to_silenced(name, silenced_stages = silenced_stages)
 
             @functools.wraps(func)
             async def wrapper(**kwargs):
@@ -581,6 +629,7 @@ class KeyDBWorkerSettings(BaseSettings):
         name: Optional[str] = None,
         verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
+        silenced_stages: Optional[List[str]] = None,
         default_kwargs: Optional[dict] = None,
         **kwargs,
     ):
@@ -595,8 +644,8 @@ class KeyDBWorkerSettings(BaseSettings):
         if _fx is not None:
             cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, **kwargs}
             self.tasks.cronjobs.append(cron)
-            if silenced: 
-                self.add_function_to_silenced(name or _fx.__qualname__)
+            if silenced or silenced_stages: 
+                self.add_function_to_silenced(name or _fx.__qualname__, silenced_stages = silenced_stages)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return
         
@@ -604,8 +653,8 @@ class KeyDBWorkerSettings(BaseSettings):
             nonlocal schedule
             cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced,  **kwargs}
             self.tasks.cronjobs.append(cron)
-            if silenced: 
-                self.add_function_to_silenced(name or func.__qualname__)
+            if silenced or silenced_stages: 
+                self.add_function_to_silenced(name or func.__qualname__, silenced_stages = silenced_stages)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return func
         return decorator

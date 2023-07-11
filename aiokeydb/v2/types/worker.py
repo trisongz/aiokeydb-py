@@ -7,8 +7,9 @@ import asyncio
 import signal
 import typing
 import contextlib
+import functools
 from croniter import croniter
-from lazyops.utils.logs import default_logger as logger
+# from lazyops.utils.logs import default_logger as logger
 
 from aiokeydb.v2.exceptions import ConnectionError
 from aiokeydb.v2.configs import settings as default_settings
@@ -22,6 +23,7 @@ from aiokeydb.v2.utils.queue import (
     ensure_coroutine_function,
     get_thread_pool,
 )
+from aiokeydb.v2.utils.logs import logger, ColorMap
 
 if typing.TYPE_CHECKING:
     from aiokeydb.v2.types.task_queue import TaskQueue
@@ -73,7 +75,9 @@ class Worker:
         worker_attributes: typing.Optional[typing.Dict[str, typing.Any]] = None,
         heartbeat_ttl: typing.Optional[int] = None,
         is_leader_process: typing.Optional[bool] = None,
-    ):
+        verbose_startup: typing.Optional[bool] = True,
+        verbose_concurrency: typing.Optional[bool] = True,
+    ):  # sourcery skip: low-code-quality
         self.queue = queue
         self.settings = settings or default_settings
         self.worker_host = get_hostname()
@@ -83,8 +87,12 @@ class Worker:
         
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
-        self.silenced_functions = silenced_functions if silenced_functions is not None else list(set(self.settings.worker.tasks.silenced_functions))
-        self.queue.add_silenced_functions(*self.silenced_functions)
+        
+        self.verbose_startup = verbose_startup
+        self.verbose_concurrency = verbose_concurrency
+
+        if silenced_functions:
+            self.queue.add_silenced_functions(*silenced_functions)
 
         self.startup = startup or [
             self.settings.worker.get_startup_context
@@ -113,7 +121,6 @@ class Worker:
         functions: typing.Set[typing.Callable] = set(functions or self.settings.worker.get_functions(verbose = self.debug_enabled))
         self.functions = {}
         self.cron_jobs: typing.List[CronJob] = cron_jobs or self.settings.worker.get_cronjobs()
-        # self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(threadpool_size), "vars": {}}
         self.tasks: typing.Set[asyncio.Task] = set()
         self.job_task_contexts: typing.Dict['Job', typing.Dict[str, typing.Any]] = {}
         self.dequeue_timeout = dequeue_timeout
@@ -134,16 +141,11 @@ class Worker:
             if not croniter.is_valid(job.cron):
                 raise ValueError(f"Cron is invalid {job.cron}")
             self.functions[job.function_name] = job.function
-            # functions.add(job.function)
-            # self.functions[job.function.__qualname__] = job.function
-            # self.logger(kind="startup").info(f"Added cron job {job.function.__qualname__} with cron {job.cron} to worker {self.name}.")
 
         for function in functions:
             if isinstance(function, tuple): name, function = function
-            # elif isinstance(function, Job):
             else: name = function.__qualname__
             self.functions[name] = function
-        # self.logger(kind="startup").info(f"Added {len(self.functions)} functions to worker {self.name}: {self.functions.keys()}")
         self._worker_identity: str = f'[{self.worker_pid}] {self.settings.app_name or "KeyDBWorker"}'
     
     @property
@@ -156,24 +158,40 @@ class Worker:
         Returns whether the context is retryable.
         """
         return hasattr(self.queue.ctx.async_client, "_is_retryable_wrapped")
+    
+    @property
+    def _is_primary_worker(self) -> bool:
+        """
+        Returns whether the worker is the primary worker.
+        """
+        return self.is_leader_process or self.name[-1] == '0'
 
 
-    def logger(self, job: 'Job' = None, kind: str = "enqueue"):
+    def is_silenced_function(
+        self,
+        name: str,
+        stage: typing.Optional[str] = None,
+    ) -> bool:
+        """
+        Checks if a function is silenced
+        """
+        return self.queue.is_silenced_function(name, stage = stage)
+
+
+    def logger(self, job: 'Job' = None, kind: str = "enqueue", cid: typing.Optional[int] = None):
         if job:
             return logger.bind(
-                # worker_name = self.name,
                 worker_name = self._worker_name,
-                job_id=job.id,
-                status=job.status,
+                job_id = job.id,
+                status = job.status,
                 queue_name = getattr(job.queue, 'queue_name', self.queue_name) or 'unknown queue',
-                kind=kind,
+                kind = kind,
             )
         else:
             return logger.bind(
                 worker_name = self._worker_name,
-                # worker_name = self.name,
                 queue_name = self.queue_name,
-                kind=kind,
+                kind = kind,
             )
 
     async def _before_process(self, ctx):
@@ -191,12 +209,40 @@ class Worker:
         """
         await self.queue.prepare_server()
 
+    def _get_startup_log_message(self):  # sourcery skip: low-code-quality
+        """
+        Builds the startup log message.
+        """
+        _msg = f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version}'
+        _msg += f'\n- {ColorMap.cyan}[Worker ID]{ColorMap.reset}: {ColorMap.bold}{self.worker_id}{ColorMap.reset}'
+        if self._is_primary_worker:
+            _msg += f'\n- {ColorMap.cyan}[Queue]{ColorMap.reset}: {ColorMap.bold}{self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}{ColorMap.reset}'
+            _msg += f'\n- {ColorMap.cyan}[Registered]{ColorMap.reset}: {ColorMap.bold}{len(self.functions)} functions, {len(self.cron_jobs)} cron jobs{ColorMap.reset}'
+            _msg += f'\n- {ColorMap.cyan}[Concurrency]{ColorMap.reset}: {ColorMap.bold}{self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts{ColorMap.reset}'
+            if self.verbose_startup:
+
+                _msg += f'\n- {ColorMap.cyan}[Serializer]{ColorMap.reset}: {self.queue.serializer}'
+                _msg += f'\n- {ColorMap.cyan}[Worker Attributes]{ColorMap.reset}: {self.worker_attributes}'
+                if self._is_ctx_retryable:
+                    _msg += f'\n- {ColorMap.cyan}[Retryable]{ColorMap.reset}: {self._is_ctx_retryable}'
+                _msg += f'\n- {ColorMap.cyan}[Functions]{ColorMap.reset}:'
+                for function_name in self.functions:
+                    _msg += f'\n   - {ColorMap.bold}{function_name}{ColorMap.reset}'
+                if self.settings.worker.has_silenced_functions:
+                    _msg += f"\n - {ColorMap.cyan}[Silenced Functions]{ColorMap.reset}:"
+                    for stage, silenced_functions in self.settings.worker.silenced_function_dict.items():
+                        if silenced_functions:
+                            _msg += f"\n   - {stage}: {silenced_functions}"
+                if self.queue.function_tracker_enabled:
+                    _msg += f'\n- {ColorMap.cyan}[Function Tracker Enabled]{ColorMap.reset}: {self.queue.function_tracker_enabled}'
+        return _msg
+            
 
     async def start(self):
-        """Start processing jobs and upkeep tasks."""
-        # if self.is_leader_process:
+        """
+        Start processing jobs and upkeep tasks.
+        """
         os.environ['IS_WORKER_PROCESS'] = 'true'
-        self.logger(kind = "startup").info(f'{self._worker_identity}: Queue Name: {self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}')
         if not self.settings.worker_enabled:
             self.logger(kind = "startup").warning(
                 f'{self._worker_identity}: {self.worker_host}.{self.name} is disabled.')
@@ -204,10 +250,8 @@ class Worker:
         
         self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(), "vars": {}}
         self.worker_attributes['name'] = self.name
-        # self.queue._worker_name = self.name
         self.queue._worker_name = self._worker_name
-        self.logger(kind = "startup").info(
-            f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version} | WorkerID: {self.worker_id} | Concurrency: {self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts | Serializer: {self.queue.serializer} | Worker Attributes: {self.worker_attributes} | Retryable: {self._is_ctx_retryable}')
+
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -218,14 +262,10 @@ class Worker:
             if self.startup: 
                 for func in self.startup:
                     await func(self.context)
-
-            if self.is_leader_process: self.logger(kind = "startup").info(
-                f"{self._worker_identity}: Registered {len(self.functions)} functions, {len(self.cron_jobs)} cron jobs, {self.concurrency} concurrency. Functions: {list(self.functions.keys())}"
-            )
-            if self.silenced_functions and self.is_leader_process:
-                self.logger(kind = "startup").info(
-                    f"{self._worker_identity}: Silenced functions: {self.silenced_functions}"
-                )
+            
+            self.logger(kind = "startup").info(self._get_startup_log_message())
+            # if self.queue.function_tracker_enabled:
+            #     await self.queue.setup_function_tracker(self.functions)
 
             # Register the queue
             # await self.queue.register_queue()
@@ -236,17 +276,15 @@ class Worker:
             await self.prepare_server()
 
             self.tasks.update(await self.upkeep())
-            for _ in range(self.concurrency):
-                self._process()
+            for cid in range(self.concurrency):
+                self._process(concurrency_id = cid)
             
             for _ in range(self.broadcast_concurrency):
                 self._broadcast_process()
 
             await self.event.wait()
         finally:
-            self.logger(kind = "shutdown").warning(
-                f'{self._worker_identity}: {self.worker_host}.{self.name} is shutting down.'
-                )
+            self.logger(kind = "shutdown").warning(f'{self._worker_identity}: {self.worker_host}.{self.name} is shutting down.')
             if self.shutdown:
                 for func in self.shutdown:
                     await func(self.context)
@@ -266,11 +304,9 @@ class Worker:
     async def schedule(self, lock=1):
         for cron_job in self.cron_jobs:
             kwargs = cron_job.__dict__.copy()
-            # function = kwargs.pop("function").__qualname__
             _ = kwargs.pop("function")
             _ = kwargs.pop("cron_name")
             function = cron_job.function_name
-            # function = kwargs.pop("function").
             default_kwargs = kwargs.pop('default_kwargs', {})
             if default_kwargs: kwargs.update(default_kwargs)
 
@@ -307,13 +343,10 @@ class Worker:
                 try:
                     if asyncio.iscoroutinefunction(func):
                         await func(arg or sleep, **kwargs)
-                    else:
-                        func(arg or sleep, **kwargs)
+                    else: func(arg or sleep, **kwargs)
                 except (Exception, asyncio.CancelledError):
-                    if self.event.is_set():
-                        return
+                    if self.event.is_set(): return
                     get_and_log_exc(func = func)
-
                 await asyncio.sleep(sleep)
 
         return [
@@ -326,9 +359,6 @@ class Worker:
             asyncio.create_task(
                 poll(self.heartbeat, self.timers["heartbeat"], self.heartbeat_ttl)
             ),
-            # asyncio.create_task(
-            #     poll(self._broadcast_process, self.timers["broadcast"])
-            # ),
 
         ]
 
@@ -354,9 +384,10 @@ class Worker:
 
             await job.finish(JobStatus.ABORTED, error = abort.decode("utf-8"))
             await self.queue.ctx.async_delete(job.abort_id)
-            self.logger(job = job, kind = "abort").info(f"⊘ {job.duration('running')}ms, node={self.node_name}, func={job.function}, id={job.id}")
+            if not self.is_silenced_function(job.function, stage = "abort"):
+                self.logger(job = job, kind = "abort").info(f"⊘ {job.duration('running')}ms, node={self.node_name}, func={job.function}, id={job.id}")
     
-    async def process(self, broadcast: typing.Optional[bool] = False):
+    async def process(self, broadcast: typing.Optional[bool] = False, concurrency_id: typing.Optional[int] = None):
         # sourcery skip: low-code-quality
         # pylint: disable=too-many-branches
         job, context = None, None
@@ -386,12 +417,13 @@ class Worker:
             job.attempts += 1
             await job.update()
             context = {**self.context, "job": job}
-            # self.logger(job = None, kind = "process").error(f"JOB: {job}")
             await self._before_process(context)
-            if job.function not in self.silenced_functions:
-                self.logger(job = job, kind = "process").info(
-                    f"← duration={job.duration('running')}ms, node={self.node_name}, func={job.function}"
-                )
+            # if job.function not in self.silenced_functions:
+            if not self.is_silenced_function(job.function, stage = "process"):
+                _msg = f"← duration={job.duration('running')}ms, node={self.node_name}, func={job.function}"
+                if self.verbose_concurrency:
+                    _msg = _msg.replace("node=", f"conn=[{concurrency_id}/{self.concurrency}], node=")
+                self.logger(job = job, kind = "process").info(_msg)
 
             function = ensure_coroutine_function(self.functions[job.function])
             task = asyncio.create_task(function(context, **(job.kwargs or {})))
@@ -426,14 +458,17 @@ class Worker:
         await self.queue.sweep(worker_id = self.name)
 
 
-    def _process(self, previous_task=None):
+    def _process(self, previous_task=None, concurrency_id: typing.Optional[int] = None):
         if previous_task:
             self.tasks.discard(previous_task)
 
         if not self.event.is_set():
-            new_task = asyncio.create_task(self.process())
+            new_task = asyncio.create_task(self.process(concurrency_id = concurrency_id))
             self.tasks.add(new_task)
-            new_task.add_done_callback(self._process)
+            if concurrency_id is not None:
+                new_task.add_done_callback(functools.partial(self._process, concurrency_id = concurrency_id))
+            else:
+                new_task.add_done_callback(self._process)
     
     def _broadcast_process(self, previous_task = None):
         if previous_task and isinstance(previous_task, asyncio.Task):
@@ -603,6 +638,7 @@ class Worker:
         _fx: typing.Optional[typing.Callable] = None,
         verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
+        silenced_stages: typing.Optional[typing.List[str]] = None,
         **kwargs,
     ):
         """
@@ -617,18 +653,19 @@ class Worker:
         
         """
         return default_settings.worker.add_function(
-            name = name, _fx = _fx, verbose = verbose, silenced = silenced, **kwargs
+            name = name, _fx = _fx, verbose = verbose, silenced = silenced, silenced_stages = silenced_stages, **kwargs
         )
     
     @staticmethod
     def add_function_to_silenced(
         name: str,
+        silenced_stages: typing.Optional[typing.List[str]] = None,
         **kwargs
     ):
         """
         Add a function to the silenced functions list.
         """
-        default_settings.worker.add_function_to_silenced(name = name, **kwargs)
+        default_settings.worker.add_function_to_silenced(name = name, silenced_stages = silenced_stages, **kwargs)
     
 
     @staticmethod
@@ -637,6 +674,7 @@ class Worker:
         _fx: typing.Optional[typing.Callable] = None,
         verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
+        silenced_stages: typing.Optional[typing.List[str]] = None,
         **kwargs,
     ):
         """
@@ -646,7 +684,7 @@ class Worker:
         }
         """
         return default_settings.worker.add_cronjob(
-            schedule = schedule, _fx = _fx, verbose = verbose, silenced = silenced, **kwargs
+            schedule = schedule, _fx = _fx, verbose = verbose, silenced = silenced, silenced_stages = silenced_stages, **kwargs
         )
     
     
@@ -694,6 +732,7 @@ class Worker:
         suppressed_exceptions: typing.Optional[typing.List[typing.Type[Exception]]] = None,
         failed_results: typing.Optional[typing.List] = None,
         queue_func: typing.Optional[typing.Union[typing.Callable, 'TaskQueue']] = None,
+        silenced_stages: typing.Optional[typing.List[str]] = None,
         **kwargs,
     ):
         """
@@ -721,5 +760,6 @@ class Worker:
             suppressed_exceptions = suppressed_exceptions, 
             failed_results = failed_results,
             queue_func = queue_func, 
+            silenced_stages = silenced_stages,
             **kwargs
         )

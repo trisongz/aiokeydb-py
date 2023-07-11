@@ -1,4 +1,5 @@
 import os
+import gc
 import json
 import time
 import asyncio
@@ -28,6 +29,7 @@ from aiokeydb.v2.connection import (
 from aiokeydb.v2.types.jobs import (
     Job,
     JobStatus,
+    FunctionTracker,
     TERMINAL_STATUSES,
     UNSUCCESSFUL_TERMINAL_STATUSES,
 )
@@ -120,6 +122,10 @@ class QueueStats(BaseModel):
     def heartbeat_key(self) -> str:
         return f"{self.prefix}:{self.name}:heartbeat"
     
+    @lazyproperty
+    def function_tracker_key(self) -> str:
+        return f"{self.prefix}:{self.name}:functiontracker"
+    
     def create_namespace(self, namespace: str) -> str:
         return f"{self.prefix}:{self.name}:{namespace}"
     
@@ -175,6 +181,8 @@ class TaskQueue:
         silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
         heartbeat_ttl: typing.Optional[int] = None, # 10,
         is_leader_process: typing.Optional[bool] = None,
+        function_tracker_enabled: typing.Optional[bool] = None,
+        function_tracker_ttl: typing.Optional[int] = None,
         **kwargs
     ):
         self.settings = settings
@@ -192,6 +200,9 @@ class TaskQueue:
         self.max_broadcast_concurrency = max_broadcast_concurrency or self.settings.worker.max_broadcast_concurrency or 3
         
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
+        self.function_tracker_enabled = function_tracker_enabled if function_tracker_enabled is not None else self.settings.worker.function_tracker_enabled
+        self.function_tracker_ttl = function_tracker_ttl if function_tracker_ttl is not None else self.settings.worker.function_tracker_ttl
+
         # self.management_url = management_url if management_url is not None else self.settings.worker.management_url
         # self.management_enabled = management_enabled if management_enabled is not None else self.settings.worker.management_enabled
         # self.management_register_api_path = management_register_api_path if management_register_api_path is not None else self.settings.worker.management_register_api_path
@@ -214,14 +225,15 @@ class TaskQueue:
         self.verbose_results = verbose_results
         self.truncate_logs = truncate_logs
         self.logging_max_length = logging_max_length
-        self.silenced_functions = silenced_functions or []
+        # self.silenced_functions = silenced_functions or []
         self.heartbeat_ttl = heartbeat_ttl or self.settings.worker.heartbeat_interval
         self._worker_name: str = None
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.queue_pid: int = os.getpid()
-
-        if not self.silenced_functions:
-            self._set_silenced_functions()
+        if silenced_functions:
+            self.add_silenced_functions(*silenced_functions)
+        # if not self.silenced_functions:
+        #     self._set_silenced_functions()
     
     @lazyproperty
     def _lock(self) -> asyncio.Lock:
@@ -308,19 +320,33 @@ class TaskQueue:
         Returns whether the queue should debug log.
         """
         return self.debug_enabled and self.is_leader_process
+    
 
-    def _set_silenced_functions(self):
+    def is_silenced_function(
+        self,
+        name: str,
+        stage: typing.Optional[str] = None,
+    ) -> bool:
+        """
+        Checks if a function is silenced
+        """
+        return self.settings.worker.is_silenced_function(name, stage = stage)
 
-        # from aiokeydb.queues.worker import WorkerTasks
-        self.silenced_functions = list(set(self.settings.worker.tasks.silenced_functions))
+    # def _set_silenced_functions(self):
+
+    #     # from aiokeydb.queues.worker import WorkerTasks
+    #     self.silenced_functions = list(set(self.settings.worker.tasks.silenced_functions))
 
 
     def add_silenced_functions(self, *functions):
         """
         Adds functions to the list of silenced functions.
         """
-        self.silenced_functions.extend(functions)
-        self.silenced_functions = list(set(self.silenced_functions))
+        for func in functions:
+            self.settings.worker.add_function_to_silenced(func)
+            # self.silenced_functions.append(func)
+        # self.silenced_functions.extend(functions)
+        # self.silenced_functions = list(set(self.silenced_functions))
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue", job_id: typing.Optional[str] = None,):
         if job:
@@ -394,6 +420,7 @@ class TaskQueue:
     async def disconnect(self):
         await self.ctx.aclose()
 
+
     
     async def prepare_server(self):
         """
@@ -427,8 +454,9 @@ class TaskQueue:
             try:
                 await self.ctx.config_set('maxclients', new_max_connections)
                 info = await self.ctx.async_info()
-                new_set_max_connections = info['maxclients']
-                if self._should_debug_log: logger.debug(f'New Max Connections: {new_set_max_connections}')
+                if 'maxclients' in info:
+                    new_set_max_connections = info['maxclients']
+                    if self._should_debug_log: logger.debug(f'New Max Connections: {new_set_max_connections}')
             except Exception as e:
                 if self._should_debug_log:
                     logger.warning(f'Unable to configure the maxclients to {new_max_connections}: {e}')
@@ -520,8 +548,10 @@ class TaskQueue:
                 elif job.status != JobStatus.ACTIVE or job.stuck:
                     swept.append(job_id)
                     await job.finish(JobStatus.ABORTED, error="swept")
-                    if job.function in self.silenced_functions:
+                    if self.is_silenced_function(job.function, stage = 'sweep'):
                         pass
+                    # if job.function in self.silenced_functions:
+                    #     pass
                     elif self.verbose_results:
                         self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job.result}")
                     elif self.truncate_logs:
@@ -533,6 +563,7 @@ class TaskQueue:
                         self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
                     else:
                         self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
+        gc.collect()
         return swept
     
     async def sweep_job(self, job_id: str, worker_id: typing.Optional[str] = None, verbose: typing.Optional[bool] = None):
@@ -546,7 +577,9 @@ class TaskQueue:
             if verbose: self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
         elif job.status != JobStatus.ACTIVE or job.stuck:
             await job.finish(JobStatus.ABORTED, error="swept")  
-            if job.function in self.silenced_functions: 
+            # if job.function in self.silenced_functions: 
+            #     pass
+            if self.is_silenced_function(job.function, stage = 'sweep'):
                 pass
             elif verbose is False:
                 self.logger(job=job, kind = "sweep").info(f"☇ duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
@@ -667,6 +700,8 @@ class TaskQueue:
                 await self.ctx.async_delete(job.abort_id)
             else:
                 await self.ctx.async_lrem(job.active_key, 0, job.id)
+            
+            await self.track_job(job)
 
 
     async def retry(self, job: Job, error: typing.Any):
@@ -695,7 +730,7 @@ class TaskQueue:
             await pipe.set(job_id, self.serialize(job)).execute()
             self.retried += 1
             await self.notify(job)
-            if not self.debug_enabled and job.function not in self.silenced_functions:
+            if not self.is_silenced_function(job.function, stage = 'retry'):
                 self.logger(job=job, kind = "retry").info(f"↻ duration={job.duration('running')}ms, node={self.node_name}, func={job.function}, error={job.error}")
 
     async def finish(
@@ -740,9 +775,10 @@ class TaskQueue:
             await self.notify(job)
             if self.debug_enabled:
                 self.logger(job=job, kind = "finish").info(f"Finished {job}")
-            
-            elif job.function in self.silenced_functions:
+            elif self.is_silenced_function(job.function, stage = 'finish'):
                 pass
+            # elif job.function in self.silenced_functions:
+            #     pass
 
             elif self.verbose_results or not self.truncate_logs:
                 self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}")
@@ -753,6 +789,8 @@ class TaskQueue:
                     else str(job.result)
                 )
                 self.logger(job=job, kind="finish").info(f"● duration={job.duration('total')}ms, node={self.node_name}, func={job.function}, result={job_result}")
+            
+            await self.track_job(job)
 
     async def _dequeue_job_id(
         self,
@@ -901,8 +939,10 @@ class TaskQueue:
                 return None
         if not self.client_mode and self.debug_enabled:
             self.logger(job=job, kind="enqueue").info(f"Enqueuing {job}")
-        elif job.function in self.silenced_functions:
+        elif self.is_silenced_function(job.function, stage = 'enqueue'):
             pass
+        # elif job.function in self.silenced_functions:
+        #     pass
         elif self.verbose_results:
             self.logger(job=job, kind="enqueue").info(
                 f"→ duration={now() - job.queued}ms, node={self.node_name}, func={job.function}, timeout={job.timeout}, kwargs={job.kwargs}"
@@ -1638,72 +1678,85 @@ class TaskQueue:
         pass
 
     """
+    Function Tracker
+    """
+
+    async def setup_function_tracker(self, functions: typing.List[str]):
+        """
+        Sets up the function tracker for the given functions.
+        """
+        funcs = {}
+        for func in functions:
+            _existing = await self.ctx.async_get(f'{self._stats.function_tracker_key}.{func}', default = None)
+            funcs[func] = FunctionTracker.deserialize(_existing) if _existing else FunctionTracker(function = func)
+        self._function_tracker = funcs
+        logger.info(f"Function Tracker: {self._function_tracker}")
+
+    @asynccontextmanager
+    async def _fail_ok(self, duration: typing.Optional[float] = 5.0):
+        """
+        Allows a block of code to fail without raising an exception.
+        """
+        try:
+            async with anyio.fail_after(duration):
+                yield
+        except Exception as e:
+            logger.trace(f"Failed OK: {e}", error = e, level = "WARNING")
+
+    async def _get_function_tracker(self, function: str, none_ok: typing.Optional[bool] = True) -> typing.Optional[FunctionTracker]:
+        """
+        Returns the function tracker for the given function.
+        """
+        if not self.function_tracker_enabled: return None
+        function_tracker = await self.ctx.async_get(f'{self._stats.function_tracker_key}.{function}', default = None)
+        if function_tracker:
+            function_tracker = FunctionTracker.deserialize(function_tracker)
+        elif none_ok: return None
+        else:
+            function_tracker = FunctionTracker(function = function)
+        return function_tracker
+        
+
+    async def track_job(self, job: Job):
+        """
+        Tracks the job results
+        """
+        if not self.function_tracker_enabled: return
+        async with self._fail_ok():
+            function_tracker = await self._get_function_tracker(job.function, none_ok = False)
+            function_tracker.track_job(job)
+            await self.ctx.async_set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
+
+    async def get_function_trackers(self) -> typing.Dict[str, FunctionTracker]:
+        """
+        Returns the function trackers
+        """
+        if not self.function_tracker_enabled: return {}
+        _keys = await self.ctx.async_keys(f'{self._stats.function_tracker_key}.*')
+        _function_trackers = {}
+        for key in _keys:
+            function_tracker = await self.ctx.async_get(key, default = None)
+            if function_tracker:
+                function_tracker = FunctionTracker.deserialize(function_tracker)
+                _function_trackers[function_tracker.function] = function_tracker
+        return _function_trackers
+    
+    async def reset_function_trackers(self, functions: typing.Optional[typing.List[str]] = None):
+        """
+        Resets the function trackers
+        """
+        if not self.function_tracker_enabled: return
+        async with self._fail_ok():
+            if functions is None: 
+                functions = await self.ctx.async_keys(f'{self._stats.function_tracker_key}.*')
+            else:
+                functions = [f'{self._stats.function_tracker_key}.{function}' for function in functions]
+            for function in functions:
+                await self.ctx.async_delete(f'{self._stats.function_tracker_key}.{function}')
+
+    """
     Management Methods
     """
-    # async def fetch_worker_token(self) -> str:
-    #     """
-    #     Fetches the worker token from keydb
-    #     """
-    #     token = await self.ctx.async_get(self.worker_token_key, self.settings.worker.token)
-    #     if token: token = self.serializer.loads(token)
-    #     return token
-
-    # async def register_queue(self):
-    #     """
-    #     Updates the Queue Key to Register Worker
-    #     """
-    #     queues: typing.List[str] = await self.ctx.async_get(self.management_queue_key, [])
-    #     if queues: queues = self.serializer.loads(queues)
-    #     if self.queue_name not in queues: 
-    #         queues.append(self.queue_name)
-    #         await self.ctx.async_set(self.management_queue_key, self.serializer.dumps(queues))
-    #         self.logger(kind = "startup").info(f'Registering queue "{self.queue_name}:{self.uuid}" with Management API')
-    #     else:
-    #         self.logger(kind = "startup").info(f'Queue "{self.queue_name}:{self.uuid}" already registered with Management API')
-    #     return {'registered': True}
-
-    # @require_aiohttpx()
-    # async def register_worker(self):
-    #     """
-    #     Register this worker with the Management API.
-    #     """
-    #     if not self.management_enabled or not self.management_endpoint: return
-    #     await self.ctx.async_wait_for_ready(max_attempts = 20)
-    #     async with aiohttpx.Client() as client:
-    #         attempts = 0
-    #         token = await self.fetch_worker_token()
-    #         self.logger(kind = "startup").info(
-    #             f'Registering queue "{self.queue_name}:{self.uuid}" \
-    #             with Management API @ "{self.management_url}" \
-    #             with token: {token}')
-            
-    #         while attempts < 5:
-    #             try:
-    #                 await client.async_post(
-    #                     url = self.management_endpoint,
-    #                     timeout = 5.0, 
-    #                     json = {
-    #                         "queue_name": self.queue_name,
-    #                         "uuid": self.uuid,
-    #                         "token": token,
-    #                     }
-    #                 )
-    #                 self.logger(kind = "startup").info(
-    #                     f'Succesfully registered queue "{self.queue_name}:{self.uuid}"'
-    #                 )
-    #                 return {'registered': True}
-                
-    #             except (aiohttpx.HTTPError, asyncio.TimeoutError, aiohttpx.NetworkError, aiohttpx.ConnectError):
-    #                 attempts += 1
-    #                 await asyncio.sleep(2.5)
-    #                 continue
-
-    #             except Exception as e:
-    #                 self.logger(kind = "startup").error(
-    #                     f'Failed to register queue "{self.queue_name}:{self.uuid}" with Management API: {e}'
-    #                 )
-    #                 return {'registered': False}
-    #     return {'registered': False}
 
     """
     Alias Properties
