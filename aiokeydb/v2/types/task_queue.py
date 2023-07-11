@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager, suppress
 from lazyops.utils.logs import default_logger as logger
 # from lazyops.utils import logger
 from lazyops.utils.serialization import ObjectEncoder
+from lazyops.utils.ahelpers import amap_v2
 
 from aiokeydb.v2.types.base import BaseModel, Field, validator
 from aiokeydb.v2.types.base import KeyDBUri, lazyproperty
@@ -566,12 +567,13 @@ class TaskQueue:
         gc.collect()
         return swept
     
-    async def sweep_job(self, job_id: str, worker_id: typing.Optional[str] = None, verbose: typing.Optional[bool] = None):
+    async def sweep_job(self, job_id: typing.Optional[str] = None, worker_id: typing.Optional[str] = None, job: typing.Optional[Job] = None, verbose: typing.Optional[bool] = None):
         # sourcery skip: low-code-quality
         """
         Sweep a single job.
         """
-        job = await self._get_job_by_id(job_id)
+        assert job_id or job, "Must provide either job_id or job"
+        job = await self._get_job_by_id(job_id) if job is None else job
         verbose = verbose if verbose is not None else self.verbose_results
         if not job:
             if verbose: self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
@@ -601,6 +603,7 @@ class TaskQueue:
                 .zrem(incomplete_key, job_id)
                 .execute()
             )
+        return True
 
     async def listen(self, job_keys: typing.List[str], callback: typing.Callable, timeout: int = 10):
         """
@@ -1624,6 +1627,54 @@ class TaskQueue:
         if kind == "incomplete":
             return await self.ctx.async_zcard(f"{self.incomplete_key}:{postfix}" if postfix else self.incomplete_key)
         raise ValueError(f"Can't count unknown type {kind} {postfix}")
+
+    @property
+    def _queue_kind_key_map(self) -> typing.Dict[str, str]:
+        return {
+            "queued": self.queued_key,
+            "active": self.active_key,
+            "scheduled": self.scheduled_key,
+            "incomplete": self.incomplete_key,
+        }
+
+    async def get_job_ids_in_queue(self, kind: str, key: typing.Optional[str] = None, postfix: typing.Optional[str] = None, encode: typing.Optional[bool] = True) -> typing.List[str]:
+        """
+        Returns all jobs in the given queue.
+        """
+        if not key:
+            base_key = self._queue_kind_key_map[kind]
+            key = f"{base_key}:{postfix}" if postfix else base_key
+        results: typing.List[bytes] = await self.ctx.async_lrange(key, 0, -1)
+        return [result.decode("utf-8") for result in results] if encode else results
+    
+    async def sweep_jobs_by_status(self, status: JobStatus, kind: typing.Optional[str] = "active", key: typing.Optional[str] = None, postfix: typing.Optional[str] = None, verbose: typing.Optional[bool] = None, **kwargs):
+        """
+        Sweeps all jobs with the given status.
+        """
+        verbose = verbose or self._should_debug_log
+        job_ids = await self.get_job_ids_in_queue(kind, key = key, postfix = postfix)
+        if not job_ids: 
+            if verbose: logger.info(f"No jobs found in {kind} queue")
+            return
+        if verbose: logger.info(f"Sweeping {len(job_ids)} jobs from {kind} queue with status {status}")
+
+        async def _sweep_job(job_id: str):
+            """
+            Inner sweep job function
+            """
+            job = await self._get_job_by_id(job_id)
+            if job.status == status:
+                if verbose: logger.info(f"Sweeping job {job_id} with status {status}")
+                await self.sweep_job(job = job, verbose = verbose)
+            else:
+                if verbose: logger.info(f"Skipping job {job_id} with status {job.status}")
+
+        async for _ in amap_v2(
+            _sweep_job,
+            job_ids,
+        ):
+            pass
+        return job_ids
 
 
     """
