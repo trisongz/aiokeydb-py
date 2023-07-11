@@ -595,6 +595,8 @@ class KeyDBWorkerSettings(BaseSettings):
         if _fx is not None:
             cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, **kwargs}
             self.tasks.cronjobs.append(cron)
+            if silenced: 
+                self.add_function_to_silenced(name or _fx.__qualname__)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return
         
@@ -602,6 +604,8 @@ class KeyDBWorkerSettings(BaseSettings):
             nonlocal schedule
             cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced,  **kwargs}
             self.tasks.cronjobs.append(cron)
+            if silenced: 
+                self.add_function_to_silenced(name or func.__qualname__)
             if verbose: logger.info(f'Registered CronJob: {cron}')
             return func
         return decorator
