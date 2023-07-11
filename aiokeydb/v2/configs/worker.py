@@ -158,9 +158,13 @@ class KeyDBWorkerSettings(BaseSettings):
             if isinstance(cron_op, dict): 
                 silenced = cron_op.pop('silenced', None)
                 cron_op = CronJob(**cron_op)
-                if silenced is True: self.tasks.silenced_functions.append(cron_op.function.__name__)
+                if silenced is True: 
+                    self.add_function_to_silenced(cron_op.function_name)
+                    # self.tasks.silenced_functions.append(cron_op.function_name)
+                # if silenced is True: self.tasks.silenced_functions.append(cron_op.function.__name__)
             if verbose: 
-                logger.info(f'Worker CronJob: {cron_op.function.__name__}: {cron_op.cron}')
+                # logger.info(f'Worker CronJob: {cron_op.function.__name__}: {cron_op.cron}')
+                logger.info(f'Worker CronJob: {cron_op.function_name}: {cron_op.cron}')
             cronjobs.append(cron_op)
         return cronjobs
     
@@ -292,14 +296,17 @@ class KeyDBWorkerSettings(BaseSettings):
                 self.tasks.context[name] = obj
                 if verbose: logger.info(f"Registered context {name}: {obj}")
             if silenced is True:
-                self.tasks.silenced_functions.append(name)
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         if _fx is not None:
             name = name or _fx.__name__
             self.tasks.context_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered context function {name}: {_fx}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
 
         # Create a wrapper
@@ -307,7 +314,9 @@ class KeyDBWorkerSettings(BaseSettings):
             func_name = name or func.__name__
             self.tasks.context_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered context function {func_name}: {func}")
-            if silenced is True: self.tasks.silenced_functions.append(func_name)
+            if silenced is True: 
+                self.add_function_to_silenced(func_name)
+                # self.tasks.silenced_functions.append(func_name)
             return func
         
         return wrapper
@@ -335,14 +344,18 @@ class KeyDBWorkerSettings(BaseSettings):
             name = name or obj.__name__
             self.tasks.dependencies[name] = (obj, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {obj}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         if _fx is not None:
             name = name or _fx.__name__
             self.tasks.dependencies[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {_fx}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         # Create a wrapper
@@ -350,7 +363,9 @@ class KeyDBWorkerSettings(BaseSettings):
             func_name = name or func.__name__
             self.tasks.dependencies[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered depency{func_name}: {func}")
-            if silenced is True: self.tasks.silenced_functions.append(func_name)
+            if silenced is True: 
+                self.add_function_to_silenced(func_name)
+                # self.tasks.silenced_functions.append(func_name)
             return func
         
         return wrapper
@@ -389,14 +404,18 @@ class KeyDBWorkerSettings(BaseSettings):
             name = name or _fx.__name__
             self.tasks.startup_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered startup function {name}: {_fx}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         def decorator(func: Callable):
             func_name = name or func.__name__
             self.tasks.startup_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered startup function {func_name}: {func}")
-            if silenced is True: self.tasks.silenced_functions.append(func_name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(func_name)
             # logger.info(f"Registered startup function {func_name}: {func}: {kwargs}")
             return func
         
@@ -418,14 +437,18 @@ class KeyDBWorkerSettings(BaseSettings):
             name = name or _fx.__name__
             self.tasks.shutdown_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered shutdown function {name}: {_fx}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         def decorator(func: Callable):
             func_name = name or func.__name__
             self.tasks.shutdown_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered shutdown function {func_name}: {func}")
-            if silenced is True: self.tasks.silenced_functions.append(func_name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(func_name)
             return func
         return decorator
 
@@ -456,7 +479,9 @@ class KeyDBWorkerSettings(BaseSettings):
                 self.tasks.functions.append(_fx)
             if verbose:
                 logger.info(f"Registered function {name}: {_fx}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: 
+                self.add_function_to_silenced(name)
+                # self.tasks.silenced_functions.append(name)
             return
         
         def decorator(func: Callable):
@@ -468,7 +493,9 @@ class KeyDBWorkerSettings(BaseSettings):
                 self.tasks.functions.append(func)
             if verbose:
                 logger.info(f"Registered function {func_name}")
-            if silenced is True: self.tasks.silenced_functions.append(func_name)
+            if silenced is True: 
+                self.add_function_to_silenced(func_name)
+                # self.tasks.silenced_functions.append(func_name)
             return func
         
         return decorator
@@ -528,7 +555,8 @@ class KeyDBWorkerSettings(BaseSettings):
             self.tasks.functions.append(func)
             name = func.__name__
             if verbose: logger.info(f"Registered fallback function {name}")
-            if silenced is True: self.tasks.silenced_functions.append(name)
+            # if silenced is True: self.tasks.silenced_functions.append(name)
+            if silenced is True: self.add_function_to_silenced(name)
 
             @functools.wraps(func)
             async def wrapper(**kwargs):

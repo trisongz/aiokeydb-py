@@ -316,6 +316,9 @@ class TaskQueue:
 
 
     def add_silenced_functions(self, *functions):
+        """
+        Adds functions to the list of silenced functions.
+        """
         self.silenced_functions.extend(functions)
         self.silenced_functions = list(set(self.silenced_functions))
 
