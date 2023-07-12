@@ -574,6 +574,7 @@ class TaskQueue:
         """
         assert job_id or job, "Must provide either job_id or job"
         job = await self._get_job_by_id(job_id) if job is None else job
+        job_id = job_id if job_id is not None else job.id
         verbose = verbose if verbose is not None else self.verbose_results
         if not job:
             if verbose: self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
