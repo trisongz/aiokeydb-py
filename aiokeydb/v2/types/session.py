@@ -633,13 +633,15 @@ class KeyDBSession:
     def serialize(
         self, 
         value: typing.Any, 
-        serializer: typing.Optional[typing.Callable] = None,
+        serializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
         **kwargs
     ):
         """
         Handles serialization
         """
-        if serializer: return serializer(value, **kwargs)
+        if serializer and callable(serializer): return serializer(value, **kwargs)
+        if serializer is False: return value
+        if serializer is True: return self.encoder.encode(value)
         if self.serializer:
             try:
                 return self.serializer.dumps(value, **kwargs)
@@ -648,15 +650,17 @@ class KeyDBSession:
         return value
     
     def deserialize(
-            self, 
-            value: typing.Any, 
-            deserializer: typing.Optional[typing.Callable] = None,
-            **kwargs
-        ):
+        self, 
+        value: typing.Any, 
+        deserializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
+        **kwargs
+    ):
         """
         Handles deserialization
         """
-        if deserializer: return deserializer(value, **kwargs)
+        if deserializer and callable(deserializer): return deserializer(value, **kwargs)
+        if deserializer is False: return value
+        if deserializer is True: return self.encoder.decode(value)
         if self.serializer:
             try:
                 return self.serializer.loads(value, **kwargs)
@@ -679,7 +683,7 @@ class KeyDBSession:
         get: bool = False,
         exat: typing.Union[AbsExpiryT, None] = None,
         pxat: typing.Union[AbsExpiryT, None] = None,
-        _serializer: typing.Optional[typing.Callable] = None,
+        _serializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
         **kwargs
     ) -> typing.Any:
         """
@@ -712,7 +716,7 @@ class KeyDBSession:
         get: bool = False,
         exat: typing.Union[AbsExpiryT, None] = None,
         pxat: typing.Union[AbsExpiryT, None] = None,
-        _serializer: typing.Optional[typing.Callable] = None,
+        _serializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
         **kwargs
     ) -> typing.Any:
         """
@@ -738,7 +742,7 @@ class KeyDBSession:
         name: str, 
         default: typing.Any = None,
         _return_raw_value: typing.Optional[bool] = None,
-        _serializer: typing.Optional[typing.Callable] = None,
+        _serializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
         **kwargs
     ) -> typing.Any:
         """
@@ -764,7 +768,7 @@ class KeyDBSession:
         name: str, 
         default: typing.Any = None, 
         _return_raw_value: typing.Optional[bool] = None,
-        _serializer: typing.Optional[typing.Callable] = None,
+        _serializer: typing.Optional[typing.Union[typing.Callable, bool]] = None,
         **kwargs
     ) -> typing.Any:
         """
