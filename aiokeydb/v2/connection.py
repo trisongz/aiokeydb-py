@@ -5,6 +5,7 @@ import asyncio
 import typing
 import contextlib
 import threading
+import inspect
 from itertools import chain
 from queue import Empty, Full, Queue, LifoQueue
 from urllib.parse import parse_qs, unquote, urlparse, ParseResult
@@ -94,6 +95,37 @@ def parse_url(url: str, _is_async: bool = False):
     return kwargs
 
 
+_conn_valid_kwarg_keys: typing.Dict[str, typing.List[str]] = {}
+
+def _extract_cls_init_kwargs(obj: object) -> typing.List[str]:
+    """
+    Extracts the kwargs that are valid for a connection class
+    """
+    argspec = inspect.getfullargspec(obj.__init__)
+    _args = []
+    for arg in argspec.args:
+        _args.append(arg)
+    for arg in argspec.kwonlyargs:
+        _args.append(arg)
+    
+    # Check if subclass of Connection
+    if hasattr(obj, "__bases__"):
+        for base in obj.__bases__:
+            _args.extend(_extract_cls_init_kwargs(base))
+
+    return list(set(_args))
+
+def filter_kwargs_for_connection(conn_cls: typing.Type[Connection], kwargs: typing.Dict[str, typing.Any]) -> typing.Dict[str, typing.Any]:
+    # sourcery skip: dict-comprehension
+    """
+    Filter out kwargs that aren't valid for a connection class
+    """
+    global _conn_valid_kwarg_keys
+    if conn_cls.__name__ not in _conn_valid_kwarg_keys:
+        _conn_valid_kwarg_keys[conn_cls.__name__] = _extract_cls_init_kwargs(conn_cls)
+    return {k: v for k, v in kwargs.items() if k in _conn_valid_kwarg_keys[conn_cls.__name__]}
+
+
 class ConnectionPool(_ConnectionPool):
     """
     Create a connection pool. ``If max_connections`` is set, then this
@@ -175,7 +207,8 @@ class ConnectionPool(_ConnectionPool):
         except Exception as e:
             logger.debug(f"Unable to set ulimits for connection: {e}")
         self.connection_class = connection_class
-        self.connection_kwargs = connection_kwargs
+        # self.connection_kwargs = connection_kwargs
+        self.connection_kwargs = filter_kwargs_for_connection(self.connection_class, connection_kwargs)
         self.max_connections = max_connections
 
         self._lock: threading.Lock = None
@@ -431,7 +464,8 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         except Exception as e:
             logger.debug(f"Unable to set ulimits for connection: {e}")
         self.connection_class: typing.Type[AsyncConnection] = connection_class
-        self.connection_kwargs: typing.Dict[str, typing.Any] = connection_kwargs or {}
+        self.connection_kwargs = filter_kwargs_for_connection(self.connection_class, connection_kwargs or {})
+        # self.connection_kwargs: typing.Dict[str, typing.Any] = connection_kwargs or {}
         self.max_connections = max_connections
 
         self._lock: asyncio.Lock = None
@@ -664,6 +698,7 @@ class BlockingConnectionPool(ConnectionPool):
         self.queue_class = queue_class
         self.timeout = timeout
         self._connections: typing.List[Connection]
+        connection_kwargs = filter_kwargs_for_connection(connection_class, connection_kwargs or {})
         super().__init__(
             connection_class = connection_class,
             max_connections = max_connections,
@@ -861,6 +896,7 @@ class AsyncBlockingConnectionPool(AsyncConnectionPool):
         self.queue_class = queue_class
         self.timeout = timeout
         self._connections: typing.List[AsyncConnection]
+        connection_kwargs = filter_kwargs_for_connection(connection_class, connection_kwargs or {})
         super().__init__(
             connection_class = connection_class,
             max_connections = max_connections,

@@ -107,6 +107,7 @@ class KeyDBWorkerSettings(BaseSettings):
 
     function_tracker_enabled: Optional[bool] = False
     function_tracker_ttl: Optional[int] = 60 * 60 * 24 * 7 # 7 days
+    verbose_startup: Optional[bool] = False
 
     class Config:
         case_sensitive = False

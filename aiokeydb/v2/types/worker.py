@@ -75,7 +75,7 @@ class Worker:
         worker_attributes: typing.Optional[typing.Dict[str, typing.Any]] = None,
         heartbeat_ttl: typing.Optional[int] = None,
         is_leader_process: typing.Optional[bool] = None,
-        verbose_startup: typing.Optional[bool] = True,
+        verbose_startup: typing.Optional[bool] = None,
         verbose_concurrency: typing.Optional[bool] = True,
     ):  # sourcery skip: low-code-quality
         self.queue = queue
@@ -88,7 +88,7 @@ class Worker:
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.debug_enabled = debug_enabled if debug_enabled is not None else self.settings.worker.debug_enabled
         
-        self.verbose_startup = verbose_startup
+        self.verbose_startup = verbose_startup if verbose_startup is not None else self.settings.worker.verbose_startup
         self.verbose_concurrency = verbose_concurrency
 
         if silenced_functions:
