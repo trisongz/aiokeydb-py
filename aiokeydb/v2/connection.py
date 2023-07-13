@@ -461,6 +461,7 @@ class AsyncConnectionPool(_AsyncConnectionPool):
             raise ValueError('"max_connections" must be a positive integer')
         try:
             set_ulimits(max_connections)
+            # logger.info(f"Set ulimits to {max_connections}")
         except Exception as e:
             logger.debug(f"Unable to set ulimits for connection: {e}")
         self.connection_class: typing.Type[AsyncConnection] = connection_class
@@ -547,7 +548,7 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         async with self._lock:
             try:
                 connection: typing.Type[AsyncConnection] = self._available_connections.pop()
-                logger.debug(f"{command_name} {keys} {options} | Got connection: {connection}: {connection.pid} {self._created_connections}/{self.max_connections}")
+                # logger.info(f"{command_name} {keys} {options} | Got connection: {connection}: {connection.pid} {self._created_connections}/{self.max_connections}")
             except IndexError:
                 try:
                     connection = self.make_connection()

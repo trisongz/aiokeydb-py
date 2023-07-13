@@ -102,7 +102,7 @@ class KeyDBSettings(BaseSettings):
     retry_client_enabled: Optional[bool] = True
     retry_client_max_attempts: Optional[int] = 15
     retry_client_max_delay: Optional[int] = 60
-    retry_client_logging_level: Optional[int] = logging.DEBUG
+    retry_client_logging_level: Optional[int] = logging.INFO
 
     single_connection_client: Optional[bool] = False
     health_check_interval: Optional[int] = 15
@@ -114,7 +114,7 @@ class KeyDBSettings(BaseSettings):
 
     config_kwargs: Optional[Union[str, Dict[str, Any]]] = {}
     
-    log_level: Optional[str] = 'INFO'
+    log_level: Optional[str] = 'DEBUG'
     debug_enabled: Optional[bool] = False
 
     is_leader_process: Optional[bool] = None

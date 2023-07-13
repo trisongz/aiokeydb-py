@@ -416,6 +416,8 @@ class Worker:
             job.status = JobStatus.ACTIVE
             job.attempts += 1
             await job.update()
+            if self.queue.function_tracker_enabled:
+                await self.queue.track_job_id(job)
             context = {**self.context, "job": job}
             await self._before_process(context)
             # if job.function not in self.silenced_functions:

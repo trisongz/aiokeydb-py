@@ -127,6 +127,10 @@ class QueueStats(BaseModel):
     def function_tracker_key(self) -> str:
         return f"{self.prefix}:{self.name}:functiontracker"
     
+    @lazyproperty
+    def queue_job_ids_key(self) -> str:
+        return f"{self.prefix}:{self.name}:jobids"
+
     def create_namespace(self, namespace: str) -> str:
         return f"{self.prefix}:{self.name}:{namespace}"
     
@@ -652,8 +656,10 @@ class TaskQueue:
         job.touched = now()
         await self.ctx.async_set(job.id, self.serialize(job))
         await self.notify(job)
+        if self.function_tracker_enabled: 
+            await self.track_job_id(job)
 
-    async def job(self, job_key: str):
+    async def job(self, job_key: str) -> Job:
         """
         Fetch a Job by key.
         """
@@ -1484,15 +1490,6 @@ class TaskQueue:
     """
     
 
-
-    # async def version(self):
-    #     if not self._version:
-    #         async with self._lock:
-    #             info = await self.ctx.async_info()
-    #             self._version = tuple(int(i) for i in info["redis_version"].split("."))
-    #         logger.info(f"{self.queue_name} | Fetched Version: {self._version}")
-    #     return self._version
-
     async def fetch_job_info(
         self,
         offset: int = 0, 
@@ -1638,10 +1635,26 @@ class TaskQueue:
             "incomplete": self.incomplete_key,
         }
 
-    async def get_job_ids_in_queue(self, kind: str, key: typing.Optional[str] = None, postfix: typing.Optional[str] = None, encode: typing.Optional[bool] = True) -> typing.List[str]:
+    @property
+    async def _all_queue_jobs(self) -> typing.Dict[str, JobStatus]:
+        """
+        Returns all jobs in all queues
+        """
+        job_ids = await self.ctx.async_hgetall(self._stats.queue_job_ids_key)
+        if not job_ids: return {}
+        return {
+            job_id.decode("utf-8"): JobStatus(job_status.decode("utf-8")) for job_id, job_status in job_ids.items()
+        } 
+
+    async def get_job_ids_in_queue(self, kind: typing.Optional[str] = None, key: typing.Optional[str] = None, postfix: typing.Optional[str] = None, encode: typing.Optional[bool] = True) -> typing.List[str]:
         """
         Returns all jobs in the given queue.
         """
+        if not kind:
+            job_ids = await self.ctx.async_hgetall(self._stats.queue_job_ids_key)
+            # logger.info(f"Job ids: {job_ids}")
+            return [job_id.decode("utf-8") for job_id in job_ids.keys()] if encode else job_ids.keys()
+
         if not key:
             base_key = self._queue_kind_key_map[kind]
             key = f"{base_key}:{postfix}" if postfix else base_key
@@ -1745,7 +1758,7 @@ class TaskQueue:
         logger.info(f"Function Tracker: {self._function_tracker}")
 
     @asynccontextmanager
-    async def _fail_ok(self, duration: typing.Optional[float] = 5.0):
+    async def _fail_ok(self, duration: typing.Optional[float] = 7.0):
         """
         Allows a block of code to fail without raising an exception.
         """
@@ -1767,7 +1780,19 @@ class TaskQueue:
         else:
             function_tracker = FunctionTracker(function = function)
         return function_tracker
-        
+    
+    async def track_job_id(self, job: Job):
+        """
+        Inserts the job id into the queue
+        """
+        async with self._fail_ok():
+            if job.status in TERMINAL_STATUSES:
+                await self.ctx.async_hdel(self._stats.queue_job_ids_key, job.id)
+                # logger.info(f"Dropping job id {job.id}")
+            else:
+                await self.ctx.async_hset(self._stats.queue_job_ids_key, job.id, job.status.value)
+                # logger.info(f"Inserting job id {job.id} with status {job.status.value}")
+                # logger.info(f"Job ids: {await self.ctx.async_hgetall(self._stats.queue_job_ids_key)}")
 
     async def track_job(self, job: Job):
         """
@@ -1778,6 +1803,7 @@ class TaskQueue:
             function_tracker = await self._get_function_tracker(job.function, none_ok = False)
             function_tracker.track_job(job)
             await self.ctx.async_set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
+            await self.track_job_id(job)
 
     async def get_function_trackers(self) -> typing.Dict[str, FunctionTracker]:
         """
