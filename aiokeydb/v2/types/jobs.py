@@ -1,17 +1,27 @@
 from __future__ import annotations
 
 import enum
+
 import typing
 import datetime
+import croniter
+
 from aiokeydb.v2.types.base import BaseModel, lazyproperty, Field, validator
 from aiokeydb.v2.utils.queue import (
     get_default_job_key, 
     now, 
     seconds, 
     exponential_backoff,
+    import_function,
+    get_func_name,
+    get_func_full_name,
+    ensure_coroutine_function,
+    create_background_task
 )
 from aiokeydb.v2.configs import settings
+from aiokeydb.v2.utils.logs import logger
 from aiokeydb.v2.types.static import JobStatus, TaskType, TERMINAL_STATUSES, UNSUCCESSFUL_TERMINAL_STATUSES
+
 
 if typing.TYPE_CHECKING:
     from aiokeydb.v2.types.task_queue import TaskQueue
@@ -33,11 +43,15 @@ class CronJob(BaseModel):
     cron: str
     unique: bool = True
     cron_name: typing.Optional[str] = None
-    timeout: typing.Optional[int] = None
+    timeout: typing.Optional[int] = Field(default_factory = settings.get_default_job_timeout)
+    retries: typing.Optional[int] = Field(default_factory = settings.get_default_job_retries)
+    ttl: typing.Optional[int] = Field(default_factory = settings.get_default_job_ttl)
     heartbeat: typing.Optional[int] = None
-    retries: typing.Optional[int] = None
-    ttl: typing.Optional[int] = Field(default_factory = settings.get_default_job_timeout)
     default_kwargs: typing.Optional[dict] = None
+
+    # Allow for passing in a callback function to be called after the job is run
+    callback: typing.Optional[typing.Union[str, typing.Callable]] = None
+    callback_kwargs: typing.Optional[dict] = Field(default_factory=dict)
 
     @property
     def function_name(self) -> str:
@@ -45,6 +59,44 @@ class CronJob(BaseModel):
         Returns the name of the function
         """
         return self.cron_name or self.function.__qualname__
+    
+    @validator("callback")
+    def validate_callback(cls, v: typing.Optional[typing.Union[str, typing.Callable]]) -> typing.Optional[str]:
+        """
+        Validates the callback and returns the function name
+        """
+        return v if v is None else get_func_full_name(v)
+    
+    def next_scheduled(self) -> int:
+        """
+        Returns the next scheduled time for the cron job
+        """
+        return int(croniter.croniter(self.cron, seconds(now())).get_next())
+
+    def to_enqueue_kwargs(self, job_key: typing.Optional[str] = None, exclude_none: typing.Optional[bool] = True, **kwargs) -> typing.Dict[str, typing.Any]:
+        """
+        Returns the kwargs for the job
+        """
+        default_kwargs = self.default_kwargs or {}
+        if kwargs: default_kwargs.update(kwargs)
+        default_kwargs['key'] = job_key
+        enqueue_kwargs = {
+            "function": self.function_name,
+            **default_kwargs,
+        }
+        if self.callback:
+            enqueue_kwargs['job_callback'] = self.callback
+            enqueue_kwargs['job_callback_kwargs'] = self.callback_kwargs
+
+        if exclude_none:
+            enqueue_kwargs = {
+                k: v
+                for k, v in enqueue_kwargs.items()
+                if v is not None
+            }
+        enqueue_kwargs['scheduled'] = self.next_scheduled()
+        return enqueue_kwargs
+    
 
 class JobProgress(BaseModel):
 
@@ -264,11 +316,13 @@ class Job(BaseModel):
     # queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None
     key: typing.Optional[str] = Field(default_factory = get_default_job_key)
     timeout: typing.Optional[int] = Field(default_factory = settings.get_default_job_timeout)
-    heartbeat: int = 0
-    retries: int = 1
-    ttl: int = Field(default_factory = settings.get_default_job_timeout)
-    retry_delay: float = 2.0
+    retries: typing.Optional[int] = Field(default_factory = settings.get_default_job_retries)
+    ttl: typing.Optional[int] = Field(default_factory = settings.get_default_job_ttl)
+    retry_delay: typing.Optional[float] = Field(default_factory = settings.get_default_job_retry_delay)
+
     retry_backoff: typing.Union[bool, float] = True
+    
+    heartbeat: int = 0
     scheduled: int = 0
     progress: float = 0.0
     attempts: int = 0
@@ -285,14 +339,40 @@ class Job(BaseModel):
 
     job_progress: typing.Optional[JobProgress] = Field(default_factory = JobProgress)
 
+    # Allow for passing in a callback function to be called after the job is run
+    job_callback: typing.Optional[typing.Union[str, typing.Callable]] = None
+    job_callback_kwargs: typing.Optional[dict] = Field(default_factory=dict)
+
+    if typing.TYPE_CHECKING:
+        queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None
+
+    
+    @validator("job_callback")
+    def validate_job_callback(cls, v: typing.Optional[typing.Union[str, typing.Callable]]) -> typing.Optional[str]:
+        """
+        Validates the callback and returns the function name
+        """
+        return v if v is None else get_func_full_name(v)
+    
+    @property
+    def job_callback_function(self) -> typing.Optional[typing.Callable]:
+        """
+        Returns the job callback function
+        """
+        if self.job_callback is None: return None
+        func = import_function(self.job_callback)
+        return ensure_coroutine_function(func)
+
+
     def __repr__(self):
         kwargs = ", ".join(
             f"{k}={v}"
             for k, v in {
+                "id": self.id,
                 "function": self.function,
+                "has_callback": self.has_job_callback,
                 "kwargs": self.kwargs,
                 "queue": self.queue.queue_name,
-                "id": self.id,
                 "scheduled": self.scheduled,
                 "progress": self.progress,
                 "process_ms": self.duration("process"),
@@ -311,6 +391,13 @@ class Job(BaseModel):
         return f"Job<{kwargs}>"
     
     @property
+    def has_job_callback(self) -> bool:
+        """
+        Checks if the job has a callback
+        """
+        return self.job_callback is not None
+
+    @property
     def short_repr(self):
         """
         Shortened representation of the job.
@@ -318,12 +405,12 @@ class Job(BaseModel):
         kwargs = ", ".join(
             f"{k}={v}"
             for k, v in {
+                "id": self.id,
                 "function": self.function,
                 "kwargs": self.kwargs,
                 "status": self.status,
                 "attempts": self.attempts,
                 "queue": self.queue.queue_name,
-                "id": self.id,
                 "worker_id": self.worker_id,
                 "worker_name": self.worker_name,
             }.items()
@@ -361,17 +448,29 @@ class Job(BaseModel):
 
     @property
     def id(self):
+        """
+        Returns the job id.
+        """
         return self.queue.job_id(self.key)
 
     @classmethod
     def key_from_id(cls, job_id: str):
+        """
+        Returns the key from a job id.
+        """
         return job_id.split(":")[-1]
 
     @property
     def abort_id(self):
+        """
+        Returns the abort id.
+        """
         return f"{self.queue.abort_id_prefix}:{self.key}"
 
     def to_dict(self):
+        """
+        Serializes the job to a dictionary.
+        """
         result = {}
         data = self.dict(
             exclude_none = True,
@@ -452,6 +551,9 @@ class Job(BaseModel):
         )
 
     def next_retry_delay(self):
+        """
+        Gets the next retry delay for the job.
+        """
         if self.retry_backoff:
             max_delay = self.retry_delay
             if max_delay is True: max_delay = None
@@ -496,6 +598,12 @@ class Job(BaseModel):
         for k, v in kwargs.items():
             setattr(self, k, v)
         await self.queue.update(self)
+    
+    # async def reset(self):
+    #     """
+    #     Resets the job to it's initial state and rerun
+    #     """
+    #     await self.queue.reset(self)
     
     async def set_progress(self, total: typing.Optional[int] = None, completed: typing.Optional[int] = None):
         """
@@ -542,17 +650,81 @@ class Job(BaseModel):
 
     @lazyproperty
     def job_fields(self) -> typing.List[str]:
+        """
+        Returns the fields of the job.
+        """
         return [field.name for field in self.__fields__.values()]
 
     def replace(self, job: 'Job'):
-        """Replace current attributes with job attributes."""
+        """
+        Replace current attributes with job attributes.
+        """
         for field in job.job_fields:
             setattr(self, field, getattr(job, field))
+
     
     @classmethod
     def get_fields(cls):
+        """
+        Returns the fields of the job.
+        """
         return [field.name for field in cls.__fields__.values()]
     
+    @classmethod
+    def from_kwargs(cls, job_or_func: typing.Union[str, 'Job', typing.Callable], **kwargs) -> 'Job':
+        """
+        Returns a job from kwargs.
+        """
+        job_kwargs = {"kwargs": {}}
+        job_fields = cls.get_fields()
+        for k, v in kwargs.items():
+            # Allow passing underscored keys
+            # to prevent collision with job fields
+            if k.startswith('_') and k[1:] in job_fields:
+                job_kwargs[k[1:]] = v
+            elif k in job_fields:
+                job_kwargs[k] = v
+            else:
+                job_kwargs["kwargs"][k] = v
+        
+        if isinstance(job_or_func, type(cls)):
+            job = job_or_func
+            for k, v in job_kwargs.items():
+                setattr(job, k, v)
+
+        elif isinstance(job_or_func, str) or callable(job_or_func):
+            job = cls(function = get_func_name(job_or_func), **job_kwargs)
+
+        else:
+            raise ValueError(f"Invalid job type {type(job_or_func)}")
+    
+        return job
+        
+    async def _run_job_callback(self):
+        """
+        Runs the job callback
+        """
+        if not self.has_job_callback: return
+        if self.status not in TERMINAL_STATUSES: return
+        try:
+            await self.job_callback_function(
+                status = self.status,
+                job_id = self.id,
+                function_name = self.function,
+                duration = self.job_duration,
+                result = self.result,
+                error = self.error,
+                **self.job_callback_kwargs or {},
+            )
+        except Exception as e:
+            logger.error(f"Failed to run job callback for {self}: {e}")
+
+    async def run_job_callback(self):
+        """
+        Runs the job callback in the background
+        """
+        create_background_task(self._run_job_callback())
+
     """
     Queue Keys for Job
     """

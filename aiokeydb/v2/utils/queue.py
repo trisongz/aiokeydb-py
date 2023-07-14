@@ -11,9 +11,11 @@ import contextlib
 import contextvars
 import asyncio
 import functools
+import inspect
 
 from concurrent import futures
-
+from lazyops.utils.helpers import import_function, timer, build_batches
+from lazyops.utils.ahelpers import amap_v2 as concurrent_map
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,13 @@ def get_func_name(func: typing.Union[str, typing.Callable]) -> str:
     Returns the function name
     """
     return func.__name__ if callable(func) else func
+
+
+def get_func_full_name(func: typing.Union[str, typing.Callable]) -> str:
+    """
+    Returns the function name
+    """
+    return f"{func.__module__}.{func.__qualname__}" if callable(func) else func
 
 def get_and_log_exc(
     job: typing.Optional['Job'] = None, 
@@ -159,3 +168,19 @@ def ensure_coroutine_function(func):
         )
 
     return wrapped
+
+
+_bg_tasks: typing.Set[asyncio.Task] = set()
+
+
+def create_background_task(func: typing.Union[typing.Callable, typing.Coroutine], *args, **kwargs):
+    """
+    Creates a background task and adds it to the global set of background tasks
+    """
+    if inspect.isawaitable(func):
+        task = asyncio.create_task(func)
+    else:
+        task = asyncio.create_task(func(*args, **kwargs))
+    _bg_tasks.add(task)
+    task.add_done_callback(_bg_tasks.discard)
+    return task

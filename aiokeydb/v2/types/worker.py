@@ -115,6 +115,7 @@ class Worker:
             "heartbeat": 5,
             "broadcast": 10,
         }
+        timers = timers or self.settings.worker.timers
         if timers: self.timers.update(timers)
         self.selectors = selectors or {}
         self.event = asyncio.Event()
@@ -178,7 +179,10 @@ class Worker:
         return self.queue.is_silenced_function(name, stage = stage)
 
 
-    def logger(self, job: 'Job' = None, kind: str = "enqueue", cid: typing.Optional[int] = None):
+    def logger(self, job: 'Job' = None, kind: str = "enqueue"):
+        """
+        The logger for the worker.
+        """
         if job:
             return logger.bind(
                 worker_name = self._worker_name,
@@ -195,10 +199,16 @@ class Worker:
             )
 
     async def _before_process(self, ctx):
+        """
+        Handles the before process function.
+        """
         if self.before_process:
             await self.before_process(ctx)
 
     async def _after_process(self, ctx):
+        """
+        Handles the after process function.
+        """
         if self.after_process:
             await self.after_process(ctx)
     
@@ -292,7 +302,9 @@ class Worker:
     
 
     async def stop(self):
-        """Stop the worker and cleanup."""
+        """
+        Stop the worker and cleanup.
+        """
         self.event.set()
         all_tasks = list(self.tasks)
         self.tasks.clear()
@@ -301,22 +313,17 @@ class Worker:
         await asyncio.gather(*all_tasks, return_exceptions=True)
     
 
-    async def schedule(self, lock=1):
+    async def schedule(self, lock: int = 1):
+        """
+        Schedule jobs.
+        """
         for cron_job in self.cron_jobs:
-            kwargs = cron_job.__dict__.copy()
-            _ = kwargs.pop("function")
-            _ = kwargs.pop("cron_name")
-            function = cron_job.function_name
-            default_kwargs = kwargs.pop('default_kwargs', {})
-            if default_kwargs: kwargs.update(default_kwargs)
-
-            kwargs["key"] = self.queue.job_id(f"cron:{function}") if kwargs.pop("unique") else None
-            scheduled = croniter(kwargs.pop("cron"), seconds(now())).get_next()
-            await self.queue.enqueue(
-                function,
-                scheduled = int(scheduled),
-                **{k: v for k, v in kwargs.items() if v is not None},
+            enqueue_kwargs = cron_job.to_enqueue_kwargs(
+                job_key = self.queue.job_id(f"cron:{cron_job.function_name}") if cron_job.unique else None,
+                exclude_none = True,
             )
+            await self.queue.enqueue(**enqueue_kwargs)
+            
 
         scheduled = await self.queue.schedule(lock)
         if scheduled and self.queue.verbose_results:
@@ -336,8 +343,9 @@ class Worker:
         )
 
     async def upkeep(self):
-        """Start various upkeep tasks async."""
-
+        """
+        Start various upkeep tasks async.
+        """
         async def poll(func, sleep, arg=None, **kwargs):
             while not self.event.is_set():
                 try:
@@ -363,6 +371,9 @@ class Worker:
         ]
 
     async def abort(self, abort_threshold: int):
+        """
+        Abort jobs that have been running for too long.
+        """
         jobs = [
             job
             for job in self.job_task_contexts
@@ -388,6 +399,9 @@ class Worker:
                 self.logger(job = job, kind = "abort").info(f"⊘ {job.duration('running')}ms, node={self.node_name}, func={job.function}, id={job.id}")
     
     async def process(self, broadcast: typing.Optional[bool] = False, concurrency_id: typing.Optional[int] = None):
+        """
+        Process a job.
+        """
         # sourcery skip: low-code-quality
         # pylint: disable=too-many-branches
         job, context = None, None
@@ -450,6 +464,9 @@ class Worker:
                     get_and_log_exc(job = job)
 
     async def process_broadcast(self):
+        """
+        This is a separate process that runs in the background to process broadcasts.
+        """
         # await self.heartbeat(self.heartbeat_ttl)
         await self.process(broadcast = True)
 
@@ -461,9 +478,10 @@ class Worker:
 
 
     def _process(self, previous_task=None, concurrency_id: typing.Optional[int] = None):
-        if previous_task:
-            self.tasks.discard(previous_task)
-
+        """
+        Handles the processing of jobs.
+        """
+        if previous_task: self.tasks.discard(previous_task)
         if not self.event.is_set():
             new_task = asyncio.create_task(self.process(concurrency_id = concurrency_id))
             self.tasks.add(new_task)
@@ -473,6 +491,9 @@ class Worker:
                 new_task.add_done_callback(self._process)
     
     def _broadcast_process(self, previous_task = None):
+        """
+        This is a separate process that runs in the background to process broadcasts.
+        """
         if previous_task and isinstance(previous_task, asyncio.Task):
             self.tasks.discard(previous_task)
 
@@ -496,7 +517,6 @@ class Worker:
         verbose = verbose or default_settings.worker.debug_enabled
         if isinstance(settings, str):
             import importlib
-
             if verbose: logger.info(f"Importing settings from {settings}")
             module_path, name = settings.strip().rsplit(".", 1)
             module = importlib.import_module(module_path)
@@ -562,7 +582,12 @@ class Worker:
             
         """
         return default_settings.worker.add_context(
-            obj = obj, name = name, verbose = verbose, silenced = silenced, _fx = _fx, **kwargs
+            obj = obj, 
+            name = name, 
+            verbose = verbose, 
+            silenced = silenced, 
+            _fx = _fx, 
+            **kwargs
         )
 
     @staticmethod
@@ -583,7 +608,12 @@ class Worker:
             kwargs: additional arguments to pass to the function
         """
         return default_settings.worker.add_dependency(
-            obj = obj, name = name, verbose = verbose, silenced = silenced, _fx = _fx, **kwargs
+            obj = obj, 
+            name = name, 
+            verbose = verbose, 
+            silenced = silenced, 
+            _fx = _fx, 
+            **kwargs
         )
 
 
@@ -616,7 +646,11 @@ class Worker:
         
         """
         return default_settings.worker.on_startup(
-            name = name, verbose = verbose, _fx = _fx, silenced = silenced, **kwargs
+            name = name, 
+            verbose = verbose, 
+            _fx = _fx, 
+            silenced = silenced, 
+            **kwargs
         )
 
     @staticmethod
@@ -631,7 +665,11 @@ class Worker:
         Add a shutdown function to the worker queue.
         """
         return default_settings.worker.on_shutdown(
-            name = name, verbose = verbose, _fx = _fx, silenced = silenced, **kwargs
+            name = name, 
+            verbose = verbose, 
+            _fx = _fx, 
+            silenced = silenced, 
+            **kwargs
         )
 
     @staticmethod
@@ -655,7 +693,12 @@ class Worker:
         
         """
         return default_settings.worker.add_function(
-            name = name, _fx = _fx, verbose = verbose, silenced = silenced, silenced_stages = silenced_stages, **kwargs
+            name = name, 
+            _fx = _fx, 
+            verbose = verbose, 
+            silenced = silenced, 
+            silenced_stages = silenced_stages, 
+            **kwargs
         )
     
     @staticmethod
@@ -677,6 +720,8 @@ class Worker:
         verbose: typing.Optional[bool] = None,
         silenced: typing.Optional[bool] = None,
         silenced_stages: typing.Optional[typing.List[str]] = None,
+        callback: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        callback_kwargs: typing.Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -686,7 +731,14 @@ class Worker:
         }
         """
         return default_settings.worker.add_cronjob(
-            schedule = schedule, _fx = _fx, verbose = verbose, silenced = silenced, silenced_stages = silenced_stages, **kwargs
+            schedule = schedule, 
+            _fx = _fx, 
+            verbose = verbose, 
+            silenced = silenced, 
+            silenced_stages = silenced_stages, 
+            callback = callback,
+            callback_kwargs = callback_kwargs,
+            **kwargs
         )
     
     

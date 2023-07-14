@@ -383,6 +383,24 @@ class KeyDBSettings(BaseSettings):
         Returns the default job timeout
         """
         return self.worker.job_timeout
+    
+    def get_default_job_ttl(self) -> int:
+        """
+        Returns the default job TTL
+        """
+        return self.worker.job_ttl
+    
+    def get_default_job_retries(self) -> int:
+        """
+        Returns the default job retries
+        """
+        return self.worker.job_retries
+    
+    def get_default_job_retry_delay(self) -> float:
+        """
+        Returns the default job retry delay
+        """
+        return self.worker.job_retry_delay
 
     @lazyproperty
     def _retry_exceptions(self) -> List[Type[Exception]]:

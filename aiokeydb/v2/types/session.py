@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from pydantic.types import ByteSize
 from aiokeydb.v2.typing import Number, KeyT, ExpiryT, AbsExpiryT, PatternT
 from aiokeydb.v2.lock import Lock, AsyncLock
-from aiokeydb.v2.core import KeyDB, PubSub, Pipeline
-from aiokeydb.v2.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline
+from aiokeydb.v2.core import KeyDB, PubSub, Pipeline, PipelineT, PubSubT
+from aiokeydb.v2.core import AsyncKeyDB, AsyncPubSub, AsyncPipeline, AsyncPipelineT, AsyncPubSubT
 
 from aiokeydb.v2.connection import Encoder, ConnectionPool, AsyncConnectionPool
 from aiokeydb.v2.exceptions import (
@@ -244,6 +244,36 @@ class KeyDBSession:
             self.state.async_pubsub = self.async_client.pubsub()
         return self.state.async_pubsub
     
+
+    def get_pubsub(
+        self, 
+        retryable: typing.Optional[bool] = None,
+        **kwargs
+    ) -> PubSubT:
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        """
+        if retryable is None: retryable = self.settings.retry_client_enabled
+        return self.client.pubsub(
+            retryable = retryable,
+            **kwargs
+        )
+
+    def get_async_pubsub(
+        self, 
+        retryable: typing.Optional[bool] = None,
+        **kwargs
+    ) -> AsyncPubSubT:
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        """
+        if retryable is None: retryable = self.settings.retry_client_enabled
+        return self.async_client.pubsub(
+            retryable = retryable,
+            **kwargs
+        )
     
     @property
     def pipeline(self) -> Pipeline:
@@ -269,6 +299,49 @@ class KeyDBSession:
             )
         return self.state.async_pipeline
     
+    def get_pipeline(
+        self, 
+        transaction: typing.Optional[bool] = True, 
+        shard_hint: typing.Optional[str] = None, 
+        retryable: typing.Optional[bool] = None,
+        **kwargs
+    ) -> PipelineT:
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        if retryable is None: retryable = self.settings.retry_client_enabled
+        return self.client.pipeline(
+            transaction = transaction,
+            shard_hint = shard_hint,
+            retryable = retryable,
+        )
+
+    def get_async_pipeline(
+        self, 
+        transaction: typing.Optional[bool] = True, 
+        shard_hint: typing.Optional[str] = None, 
+        retryable: typing.Optional[bool] = None,
+        **kwargs
+    ) -> AsyncPipelineT:
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        if retryable is None: retryable = self.settings.retry_client_enabled
+        return self.async_client.pipeline(
+            transaction = transaction,
+            shard_hint = shard_hint,
+            retryable = retryable,
+        )
+
+
     @property
     def lock(self) -> Lock:
         if self.state.lock is None:

@@ -91,8 +91,14 @@ class KeyDBWorkerSettings(BaseSettings):
     queue_name: Optional[str] = 'workers'
     job_key_method: str = 'uuid4'
     job_serializer: Optional[SerializerType] = SerializerType.dill # Optional[Union[str, SerializerType]] = SerializerType.dill
+
+    # Sets the defaults for the job
     job_prefix: Optional[str] = 'job'
     job_timeout: Optional[int] = 120 # Controls the default job timeout
+    job_ttl: Optional[int] = 60
+    job_retries: Optional[int] = 1
+    job_retry_delay: Optional[float] = 2.0
+
     concurrency: Optional[int] = 100
     max_concurrency: Optional[int] = 100
     max_broadcast_concurrency: Optional[int] = 5
@@ -108,6 +114,15 @@ class KeyDBWorkerSettings(BaseSettings):
     function_tracker_enabled: Optional[bool] = False
     function_tracker_ttl: Optional[int] = 60 * 60 * 24 * 7 # 7 days
     verbose_startup: Optional[bool] = False
+
+    # Worker Timers
+    # These mirror the default timers
+    schedule_timer: Optional[int] = 1
+    stats_timer: Optional[int] = 60
+    sweep_timer: Optional[int] = 180
+    abort_timer: Optional[int] = 1
+    heartbeat_timer: Optional[int] = 5
+    broadcast_timer: Optional[int] = 10
 
     class Config:
         case_sensitive = False
@@ -135,6 +150,20 @@ class KeyDBWorkerSettings(BaseSettings):
         Returns the worker tasks
         """
         return WorkerTasks()
+
+    @property
+    def timers(self) -> Dict[str, int]:
+        """
+        Returns the worker timers
+        """
+        return {
+            'schedule': self.schedule_timer,
+            'stats': self.stats_timer,
+            'sweep': self.sweep_timer,
+            'abort': self.abort_timer,
+            'heartbeat': self.heartbeat_timer,
+            'broadcast': self.broadcast_timer,
+        }
 
     def get_functions(
         self,
@@ -632,6 +661,8 @@ class KeyDBWorkerSettings(BaseSettings):
         silenced: Optional[bool] = None,
         silenced_stages: Optional[List[str]] = None,
         default_kwargs: Optional[dict] = None,
+        callback: Optional[Union[str, Callable]] = None,
+        callback_kwargs: Optional[dict] = None,
         **kwargs,
     ):
         """
@@ -643,7 +674,9 @@ class KeyDBWorkerSettings(BaseSettings):
         if verbose is None: verbose = self.debug_enabled
         if schedule and isinstance(schedule, str): schedule = validate_cron_schedule(schedule)
         if _fx is not None:
-            cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, **kwargs}
+            cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, 'callback': callback, **kwargs}
+            if callback_kwargs: cron['callback_kwargs'] = callback_kwargs
+
             self.tasks.cronjobs.append(cron)
             if silenced or silenced_stages: 
                 self.add_function_to_silenced(name or _fx.__qualname__, silenced_stages = silenced_stages)
@@ -652,7 +685,9 @@ class KeyDBWorkerSettings(BaseSettings):
         
         def decorator(func: Callable):
             nonlocal schedule
-            cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced,  **kwargs}
+            cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced, 'callback': callback, **kwargs}
+            if callback_kwargs: cron['callback_kwargs'] = callback_kwargs
+            
             self.tasks.cronjobs.append(cron)
             if silenced or silenced_stages: 
                 self.add_function_to_silenced(name or func.__qualname__, silenced_stages = silenced_stages)

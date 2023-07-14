@@ -30,7 +30,7 @@ from aiokeydb.v2.connection import (
     AsyncConnectionPool,
 )
 
-from typing import Any, Iterable, Mapping, Callable, overload, TYPE_CHECKING
+from typing import Any, Iterable, Mapping, Callable, Union, overload, TYPE_CHECKING
 from typing_extensions import Literal
 
 if TYPE_CHECKING:
@@ -39,6 +39,58 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+"""
+Retryable Components for AsyncKeyDB
+"""
+from .utils.helpers import get_retryable_wrapper
+
+retryable_wrapper = get_retryable_wrapper()
+
+
+class RetryablePubSub(PubSub):
+    """
+    Retryable PubSub
+    """
+
+    @retryable_wrapper
+    def subscribe(self, *args: 'ChannelT', **kwargs: typing.Callable):
+        """
+        Subscribe to channels. Channels supplied as keyword arguments expect
+        a channel name as the key and a callable as the value. A channel's
+        callable will be invoked automatically when a message is received on
+        that channel rather than producing a message via ``listen()`` or
+        ``get_message()``.
+        """
+        return super().subscribe(*args, **kwargs)
+    
+    @retryable_wrapper
+    def unsubscribe(self, *args):
+        """
+        Unsubscribe from the supplied channels. If empty, unsubscribe from
+        all channels
+        """
+        return super().unsubscribe(*args)
+
+    @retryable_wrapper
+    def listen(self) -> typing.Iterator:
+        """Listen for messages on channels this client has been subscribed to"""
+        yield from super().listen()
+
+
+class RetryablePipeline(Pipeline):
+    """
+    Retryable Pipeline
+    """
+
+    @retryable_wrapper
+    def execute(self, raise_on_error: bool = True) -> typing.List[typing.Any]:
+        """Execute all the commands in the current pipeline"""
+        return super().execute(raise_on_error = raise_on_error)
+
+
+PubSubT = Union[PubSub, RetryablePubSub]
+PipelineT = Union[Pipeline, RetryablePipeline]
 
 class KeyDB(Redis):
     """
@@ -115,13 +167,42 @@ class KeyDB(Redis):
         return cls(connection_pool=connection_pool)
 
 
+    def pubsub(
+        self, 
+        retryable: typing.Optional[bool] = False,
+        **kwargs,
+    ) -> PubSubT:
+        """
+        Return a Publish/Subscribe object. With this object, you can
+        subscribe to channels and listen for messages that get published to
+        them.
+        """
+        pubsub_class = RetryablePubSub if retryable else PubSub
+        return pubsub_class(connection_pool = self.connection_pool, **kwargs)
+    
 
-"""
-Retryable Components for AsyncKeyDB
-"""
-from .utils.helpers import get_retryable_wrapper
+    def pipeline(
+        self, 
+        transaction: bool = True, 
+        shard_hint: typing.Optional[str] = None,
+        retryable: typing.Optional[bool] = False,
+    ) -> PipelineT:
+        """
+        Return a new pipeline object that can queue multiple commands for
+        later execution. ``transaction`` indicates whether all commands
+        should be executed atomically. Apart from making a group of operations
+        atomic, pipelines are useful for reducing the back-and-forth overhead
+        between the client and server.
+        """
+        pipeline_class = RetryablePipeline if retryable else Pipeline
+        return pipeline_class(
+            connection_pool = self.connection_pool, 
+            response_callbacks = self.response_callbacks, 
+            transaction = transaction, 
+            shard_hint = shard_hint
+        )
 
-retryable_wrapper = get_retryable_wrapper()
+
 
 class AsyncRetryablePubSub(AsyncPubSub):
     """
@@ -425,13 +506,14 @@ class AsyncRetryablePipeline(AsyncPipeline):
         def zremrangebyscore(self, name: _Key, min: _Value, max: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def zrevrank(self, name: _Key, value: _Value, withscore: bool = False) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def zscore(self, name: _Key, value: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
-        def zunion(self, keys, aggregate: Incomplete | None = None, withscores: bool = False) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def zunion(self, keys, aggregate: Any | None = None, withscores: bool = False) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def zunionstore(self, dest: _Key, keys: Iterable[_Key], aggregate: Literal["SUM", "MIN", "MAX"] | None = None) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def zmscore(self, key, members) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
 
 
 
-
+AsyncPipelineT = Union[AsyncPipeline, AsyncRetryablePipeline]
+AsyncPubSubT = Union[AsyncPubSub, AsyncRetryablePubSub]
 
 class AsyncKeyDB(AsyncRedis):
     """
@@ -511,14 +593,14 @@ class AsyncKeyDB(AsyncRedis):
         self, 
         retryable: typing.Optional[bool] = False,
         **kwargs,
-    ) -> typing.Union["AsyncRetryablePubSub", "AsyncPubSub"]:
+    ) -> AsyncPubSubT:
         """
         Return a Publish/Subscribe object. With this object, you can
         subscribe to channels and listen for messages that get published to
         them.
         """
         pubsub_class = AsyncRetryablePubSub if retryable else AsyncPubSub
-        return pubsub_class(self.connection_pool, **kwargs)
+        return pubsub_class(connection_pool = self.connection_pool, **kwargs)
     
 
     def pipeline(
@@ -526,7 +608,7 @@ class AsyncKeyDB(AsyncRedis):
         transaction: bool = True, 
         shard_hint: typing.Optional[str] = None,
         retryable: typing.Optional[bool] = False,
-    ) -> typing.Union["AsyncRetryablePipeline", "AsyncPipeline"]:
+    ) -> AsyncPipelineT:
         """
         Return a new pipeline object that can queue multiple commands for
         later execution. ``transaction`` indicates whether all commands
@@ -536,8 +618,8 @@ class AsyncKeyDB(AsyncRedis):
         """
         pipeline_class = AsyncRetryablePipeline if retryable else AsyncPipeline
         return pipeline_class(
-            self.connection_pool, 
-            self.response_callbacks, 
-            transaction, 
-            shard_hint
+            connection_pool = self.connection_pool, 
+            response_callbacks = self.response_callbacks, 
+            transaction = transaction, 
+            shard_hint = shard_hint
         )
