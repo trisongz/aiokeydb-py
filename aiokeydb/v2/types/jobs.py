@@ -687,7 +687,7 @@ class Job(BaseModel):
             else:
                 job_kwargs["kwargs"][k] = v
         
-        if isinstance(job_or_func, type(cls)):
+        if isinstance(job_or_func, cls):
             job = job_or_func
             for k, v in job_kwargs.items():
                 setattr(job, k, v)
