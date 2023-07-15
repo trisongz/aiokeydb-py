@@ -516,7 +516,14 @@ class Worker:
                 
 
             function = ensure_coroutine_function(self.functions[job.function])
-            task = asyncio.create_task(function(context, **(job.kwargs or {})))
+            try:
+                task = asyncio.create_task(function(context, **(job.kwargs or {})))
+            except Exception as e:
+                self.logger(job = job, kind = "process").error(
+                    f"Failed to create task for [{job.function}] {function} with error: {e}.\nKwargs: {job.kwargs}"
+                )
+                get_and_log_exc()
+                raise e
             self.job_task_contexts[job] = {"task": task, "aborted": False}
             result = await asyncio.wait_for(task, job.timeout)
             await job.finish(JobStatus.COMPLETE, result=result)
