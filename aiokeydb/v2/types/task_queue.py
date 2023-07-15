@@ -905,7 +905,7 @@ class TaskQueue:
 
         If the job has already been enqueued, this returns None.
         """
-        job = Job.from_kwargs(job_or_func = job_or_func, **kwargs)
+        job = Job.from_kwargs(job_or_func, **kwargs)
 
         if not self._enqueue_script:
             self._enqueue_script = self.ctx.async_client.register_script(

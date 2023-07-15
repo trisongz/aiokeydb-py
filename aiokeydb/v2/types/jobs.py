@@ -675,25 +675,46 @@ class Job(BaseModel):
         """
         Returns a job from kwargs.
         """
-        job_kwargs = {"kwargs": {}}
-        job_fields = cls.get_fields()
+        # job_kwargs = {"kwargs": {}}
+        # job_fields = cls.get_fields()
+        # for k, v in kwargs.items():
+        #     # Allow passing underscored keys
+        #     # to prevent collision with job fields
+        #     if k.startswith('_') and k[1:] in job_fields:
+        #         job_kwargs[k[1:]] = v
+        #     elif k in job_fields:
+        #         job_kwargs[k] = v
+        #     else:
+        #         job_kwargs["kwargs"][k] = v
+        
+        # if isinstance(job_or_func, cls):
+        #     job = job_or_func
+        #     for k, v in job_kwargs.items():
+        #         setattr(job, k, v)
+
+        # elif isinstance(job_or_func, str) or callable(job_or_func):
+        #     job = cls(function = get_func_name(job_or_func), **job_kwargs)
+
+        job_kwargs = {}
+        job_fields = Job.get_fields()
         for k, v in kwargs.items():
-            # Allow passing underscored keys
-            # to prevent collision with job fields
-            if k.startswith('_') and k[1:] in job_fields:
-                job_kwargs[k[1:]] = v
-            elif k in job_fields:
+            if k in job_fields:
                 job_kwargs[k] = v
             else:
+                if "kwargs" not in job_kwargs:
+                    job_kwargs["kwargs"] = {}
                 job_kwargs["kwargs"][k] = v
+
+        if isinstance(job_or_func, str):
+            job = Job(function=job_or_func, **job_kwargs)
         
-        if isinstance(job_or_func, cls):
+        elif isinstance(job_or_func, Job):
             job = job_or_func
             for k, v in job_kwargs.items():
                 setattr(job, k, v)
-
-        elif isinstance(job_or_func, str) or callable(job_or_func):
-            job = cls(function = get_func_name(job_or_func), **job_kwargs)
+        
+        elif callable(job_or_func):
+            job = Job(func = job_or_func.__name__, **job_kwargs)
 
         else:
             raise ValueError(f"Invalid job type {type(job_or_func)}")
