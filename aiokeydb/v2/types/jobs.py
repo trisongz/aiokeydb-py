@@ -81,7 +81,7 @@ class CronJob(BaseModel):
         if kwargs: default_kwargs.update(kwargs)
         default_kwargs['key'] = job_key
         enqueue_kwargs = {
-            "function": self.function_name,
+            "job_or_func": self.function_name,
             **default_kwargs,
         }
         if self.callback:
