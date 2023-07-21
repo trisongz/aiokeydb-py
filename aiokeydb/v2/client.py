@@ -4890,6 +4890,19 @@ class KeyDBClientMeta(type):
                 
                     # logger.info(f'Using async session {sess_ctx.uri} for cache')
                     return await sess_ctx.cachify(**_kwargs)(func)(*args, **kwargs)
+                
+
+                # async def clear(keys: typing.Optional[typing.Union[str, typing.List[str]]] = None) -> None:
+                #     """
+                #     Clears the cache
+                #     """
+                #     cache_prefix = cache_prefix if cache_prefix is not None else _sess_ctx.cache_prefix
+                #     if not _sess_ctx: return
+                #     keys = await _sess_ctx.async_keys(f'{cache_prefix}_*') if keys is None else keys
+                #     if keys:
+                #         await _sess_ctx.async_delete(*keys)
+                #         logger.info(f'[{_sess_ctx.name}] Cleared {len(keys)} keys from cache')
+                
 
             else:
                 def _get_sess_ctx():
@@ -4914,7 +4927,20 @@ class KeyDBClientMeta(type):
                     
                     # logger.info(f'Using session {sess_ctx.uri} for cache')
                     return sess_ctx.cachify(**_kwargs)(func)(*args, **kwargs)
+            
 
+                # def clear(keys: typing.Optional[typing.Union[str, typing.List[str]]] = None) -> None:
+                #     """
+                #     Clears the cache
+                #     """
+                #     cache_prefix = cache_prefix if cache_prefix is not None else _sess_ctx.cache_prefix
+                #     if not _sess_ctx: return
+                #     keys = _sess_ctx.keys(f'{cache_prefix}_*') if keys is None else keys
+                #     if keys:
+                #         _sess_ctx.delete(*keys)
+                #         logger.info(f'[{_sess_ctx.name}] Cleared {len(keys)} keys from cache')
+                
+            # inner_wrap.clear = clear
             return inner_wrap
         return wrapper_func
 

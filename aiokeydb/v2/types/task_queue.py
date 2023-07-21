@@ -1936,7 +1936,7 @@ class TaskQueue:
         logger.info(f"Function Tracker: {self._function_tracker}")
 
     @asynccontextmanager
-    async def _fail_ok(self, duration: typing.Optional[float] = 7.0):
+    async def _fail_ok(self, duration: typing.Optional[float] = 7.0, verbose: typing.Optional[bool] = True):
         """
         Allows a block of code to fail without raising an exception.
         """
@@ -1944,7 +1944,7 @@ class TaskQueue:
             async with anyio.fail_after(duration):
                 yield
         except Exception as e:
-            logger.trace(f"Failed OK: {e}", error = e, level = "WARNING")
+            if verbose: logger.trace(f"Failed OK: {e}", error = e, level = "WARNING")
 
     async def _get_function_tracker(self, function: str, none_ok: typing.Optional[bool] = True) -> typing.Optional[FunctionTracker]:
         """
@@ -1963,7 +1963,7 @@ class TaskQueue:
         """
         Inserts the job id into the queue
         """
-        async with self._fail_ok():
+        async with self._fail_ok(verbose = False):
             if job.status in TERMINAL_STATUSES:
                 await self.ctx.async_hdel(self._stats.queue_job_ids_key, job.id)
                 # logger.info(f"Dropping job id {job.id}")
@@ -2002,7 +2002,7 @@ class TaskQueue:
         Resets the function trackers
         """
         if not self.function_tracker_enabled: return
-        async with self._fail_ok():
+        async with self._fail_ok(verbose = False):
             if functions is None: 
                 functions = await self.ctx.async_keys(f'{self._stats.function_tracker_key}.*')
             else:

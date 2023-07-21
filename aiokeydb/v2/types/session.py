@@ -4632,12 +4632,12 @@ def build_cachify_async_func(
         
         except TimeoutError:
             result = ENOVAL
-            logger.error(f'[{session.name}] Calling GET on async KeyDB timed out. Cached function: {base}')
+            logger.warning(f'[{session.name}] Calling GET on async KeyDB timed out. Cached function: {base}')
             session.state.cache_failed_attempts += 1
         
         except Exception as e:
             result = ENOVAL
-            logger.error(f'[{session.name}] Calling GET on async KeyDB failed. Cached function: {base}: {e}')
+            logger.warning(f'[{session.name}] Calling GET on async KeyDB failed. Cached function: {base}: {e}')
             session.state.cache_failed_attempts += 1
 
         is_cache_hit = result is not ENOVAL
@@ -4673,6 +4673,6 @@ def build_cachify_async_func(
     def __cache_key__(*args, **kwargs):
         "Make key for cache given function arguments."
         return f'{cache_prefix}_{args_to_key(base, args, kwargs, typed, exclude)}'
-
+    
     wrapper.__cache_key__ = __cache_key__
     return wrapper

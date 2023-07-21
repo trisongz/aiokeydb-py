@@ -396,6 +396,16 @@ class Job(BaseModel):
         Checks if the job has a callback
         """
         return self.job_callback is not None
+    
+    @property
+    def short_kwargs(self) -> str:
+        """
+        Returns the shortened kwargs to prevent overflow
+        """
+        if len(str(self.kwargs)) < 10000:
+            return str(self.kwargs)
+        return str({k: (f'{v[:50]}...' if len(str(v)) > 50 else v) for k, v in self.kwargs.items()})[:10000]
+        
 
     @property
     def short_repr(self):
@@ -407,7 +417,7 @@ class Job(BaseModel):
             for k, v in {
                 "id": self.id,
                 "function": self.function,
-                "kwargs": self.kwargs,
+                "kwargs": self.short_kwargs,
                 "status": self.status,
                 "attempts": self.attempts,
                 "queue": self.queue.queue_name,
@@ -430,7 +440,7 @@ class Job(BaseModel):
                 "status": self.status,
                 "attempts": self.attempts,
                 "progress": self.progress,
-                "kwargs": self.kwargs,
+                "kwargs": self.short_kwargs,
                 "scheduled": self.scheduled,
                 "process_ms": self.duration("process"),
                 "start_ms": self.duration("start"),

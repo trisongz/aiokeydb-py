@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_excluded_funcs = ['parse_response']
+_excluded_funcs = ['parse_response', 'ping']
 
 class retry_if_type(retry_if_exception):
     """
@@ -31,9 +31,20 @@ class retry_if_type(retry_if_exception):
     ):
         self.exception_types = exception_types
         self.excluded_types = excluded_types
+
         super().__init__(
-            lambda e: isinstance(e, exception_types) and not isinstance(e, excluded_types)
+            lambda e: self.validate_exception(e)
         )
+        # super().__init__(
+        #     lambda e: isinstance(e, exception_types) and not isinstance(e, excluded_types)
+        # )
+
+    def validate_exception(self, e: BaseException) -> bool:
+        # Exclude ping by default
+        if e.args and e.args[0] == 'PING': 
+            print('EXCLUDED PING')
+            return False
+        return isinstance(e, self.exception_types) and not isinstance(e, self.excluded_types)
 
 def get_retryable_wrapper(  
     max_attempts: int = 15,
