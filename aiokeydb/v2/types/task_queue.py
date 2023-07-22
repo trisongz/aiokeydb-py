@@ -1977,11 +1977,11 @@ class TaskQueue:
         Tracks the job results
         """
         if not self.function_tracker_enabled: return
-        async with self._fail_ok():
+        async with self._fail_ok(verbose = False):
             function_tracker = await self._get_function_tracker(job.function, none_ok = False)
             function_tracker.track_job(job)
             await self.ctx.async_set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
-            await self.track_job_id(job)
+        await self.track_job_id(job)
 
     async def get_function_trackers(self) -> typing.Dict[str, FunctionTracker]:
         """
