@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import socket
 import contextlib
@@ -41,30 +42,62 @@ class WorkerTasks(object):
     }
     queue_func: Union[Callable, 'TaskQueue'] = None
 
+# '*/5 * * * *' # every 5 minutes
+# '*/10 * * * *' # every 10 minutes
 
-_schedule_fmt = {
-    'minutes': '*/{value} * * * *',
-    'hours': '* */{value} * * *',
-    'days': '* * */{value} * *',
-    'weeks': '* * * */{value} *',
-}
+# _schedule_fmt = {
+#     'minutes': '*/{value} * * * *',
+#     'hours': '* * */{value} * * *',
+#     'days': '* * * */{value} * *',
+#     'weeks': '* * * * */{value} *',
+# }
+
+# def validate_cron_schedule(cron_schedule: str) -> str:
+#     """
+#     Validates a cron schedule and tries to fix it if it's invalid
+#     super basic, but it works
+#     """
+#     import croniter
+#     if croniter.croniter.is_valid(cron_schedule):
+#         return cron_schedule
+#     cron_schedule = cron_schedule.lower()
+#     if 'every' in cron_schedule:
+#         cron_schedule = cron_schedule.replace('every', '').strip()
+#     value, unit = cron_schedule.split(' ')
+#     if not unit.endswith('s'): unit += 's'
+#     return _schedule_fmt[unit].format(value=value)
+
+
+_time_pattern = re.compile(r'every (\d+) (\w+)(?: and (\d+) (\w+))?')
 
 def validate_cron_schedule(cron_schedule: str) -> str:
     """
-    Validates a cron schedule and tries to fix it if it's invalid
-    super basic, but it works
+    Convert natural language to cron format using regex patterns
     """
     import croniter
     if croniter.croniter.is_valid(cron_schedule):
         return cron_schedule
-    cron_schedule = cron_schedule.lower()
-    if 'every' in cron_schedule:
-        cron_schedule = cron_schedule.replace('every', '').strip()
-    value, unit = cron_schedule.split(' ')
-    if not unit.endswith('s'): unit += 's'
-    return _schedule_fmt[unit].format(value=value)
+    # Convert natural language to cron format using regex patterns
+    time_units = {
+        'minutes': '0',
+        'hours': '*',
+        'days': '*',
+        'weeks': '*',
+        'months': '*'
+    }
+    match = _time_pattern.match(cron_schedule)
+    if not match:
+        raise ValueError("Invalid cron expression.")
+    num1, unit1, num2, unit2 = match.groups()
+    if not unit1.endswith('s'): unit1 += 's'
+    if unit2 and not unit2.endswith('s'): unit2 += 's'
+    if unit1 not in time_units or (unit2 and unit2 not in time_units):
+        raise ValueError("Invalid time unit in cron expression.")
 
-
+    time_units[unit1] = f'*/{num1}'
+    if unit2: time_units[unit2] = f'*/{num2}'
+    cron_expression = f"{time_units['minutes']} {time_units['hours']} {time_units['days']} {time_units['months']} {time_units['weeks']}"
+    return cron_expression.strip()
 
 
 
