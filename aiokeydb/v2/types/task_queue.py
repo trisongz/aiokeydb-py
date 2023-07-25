@@ -1495,6 +1495,11 @@ class TaskQueue:
             for job in jobs:
                 try: await job.refresh()
                 except RuntimeError: await job.enqueue()
+                except AttributeError as e:
+                    if verbose: logger.error(f'Unable to refresh job {job}')
+                    if raise_exceptions: raise e
+                    jobs.remove(job)
+                
                 if job.status == JobStatus.COMPLETE:
                     results.append(job.result)
                     if source_job: await source_job.incr_progress()
@@ -1532,6 +1537,11 @@ class TaskQueue:
             for job in jobs:
                 try: await job.refresh()
                 except RuntimeError: await job.enqueue()
+                except AttributeError as e:
+                    if verbose: logger.error(f'Unable to refresh job {job}')
+                    if raise_exceptions: raise e
+                    jobs.remove(job)
+                
                 if job.status == JobStatus.COMPLETE:
                     yield job.result if return_results else job
                     num_results += 1
