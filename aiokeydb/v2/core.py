@@ -122,22 +122,25 @@ class KeyDB(Redis):
         Return a Redis client object configured from the given URL
 
         For example::
-
             keydb://[[username]:[password]]@localhost:6379/0
             keydbs://[[username]:[password]]@localhost:6379/0
+            dfly://[[username]:[password]]@localhost:6379/0
+            dflys://[[username]:[password]]@localhost:6379/0
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
-            unix://[username@]/path/to/socket.sock?db=0[&password=password]
+            unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
-        Five URL schemes are supported:
-
-        - `keydb://` creates a TCP socket connection.
-        - `keydbs://` creates a SSL wrapped TCP socket connection.
+        Seven URL schemes are supported:
+        - `keydb://` creates a TCP socket connection. (KeyDB)
+        - `keydbs://` creates a SSL wrapped TCP socket connection. (KeyDB)
+        - `dfly://` creates a TCP socket connection. (Dragonfly)
+        - `dflys://` creates a SSL wrapped TCP socket connection. (Dragonfly)
         - `redis://` creates a TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/redis>
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/rediss>
         - ``unix://``: creates a Unix Domain Socket connection.
+
 
         The username, password, hostname, path and all querystring values
         are passed through urllib.parse.unquote in order to replace any
@@ -546,13 +549,17 @@ class AsyncKeyDB(AsyncRedis):
         For example::
             keydb://[[username]:[password]]@localhost:6379/0
             keydbs://[[username]:[password]]@localhost:6379/0
+            dfly://[[username]:[password]]@localhost:6379/0
+            dflys://[[username]:[password]]@localhost:6379/0
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
             unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
-        Five URL schemes are supported:
-        - `keydb://` creates a TCP socket connection.
-        - `keydbs://` creates a SSL wrapped TCP socket connection.
+        Seven URL schemes are supported:
+        - `keydb://` creates a TCP socket connection. (KeyDB)
+        - `keydbs://` creates a SSL wrapped TCP socket connection. (KeyDB)
+        - `dfly://` creates a TCP socket connection. (Dragonfly)
+        - `dflys://` creates a SSL wrapped TCP socket connection. (Dragonfly)
         - `redis://` creates a TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/redis>
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:

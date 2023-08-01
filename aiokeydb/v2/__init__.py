@@ -52,6 +52,13 @@ from aiokeydb.v2.types.jobs import Job, CronJob
 from aiokeydb.v2.types.task_queue import TaskQueue
 from aiokeydb.v2.types.worker import Worker
 
+# Add KeyDB Index Types
+from aiokeydb.v2.types.indexes import (
+    KDBIndex,
+    KDBDict,
+    AsyncKDBDict,
+)
+
 # Job.update_forward_refs()
 
 __all__ = [

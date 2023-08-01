@@ -43,13 +43,15 @@ def parse_url(url: str, _is_async: bool = False):
     if not (
         url.startswith("keydb://")
         or url.startswith("keydbs://")
+        or url.startswith("dfly://")
+        or url.startswith("dflys://")
         or url.startswith("redis://")
         or url.startswith("rediss://")
         or url.startswith("unix://")
     ):
         raise ValueError(
             "KeyDB URL must specify one of the following "
-            "schemes (keydb://, keydbs://, redis://, rediss://, unix://)"
+            "schemes (keydb://, keydbs://, dfly://, dflys://, redis://, rediss://, unix://)"
         )
 
     url: ParseResult = urlparse(url)
@@ -89,7 +91,7 @@ def parse_url(url: str, _is_async: bool = False):
         if url.path and "db" not in kwargs:
             with contextlib.suppress(AttributeError, ValueError):
                 kwargs["db"] = int(unquote(url.path).replace("/", ""))
-        if url.scheme in {"rediss", "keydbs"}:
+        if url.scheme in {"rediss", "keydbs", "dflys"}:
             kwargs["connection_class"] = AsyncSSLConnection if _is_async else SSLConnection
 
     return kwargs
@@ -148,13 +150,17 @@ class ConnectionPool(_ConnectionPool):
         For example::
             keydb://[[username]:[password]]@localhost:6379/0
             keydbs://[[username]:[password]]@localhost:6379/0
+            dfly://[[username]:[password]]@localhost:6379/0
+            dflys://[[username]:[password]]@localhost:6379/0
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
             unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
-        Five URL schemes are supported:
-        - `keydb://` creates a TCP socket connection.
-        - `keydbs://` creates a SSL wrapped TCP socket connection.
+        Seven URL schemes are supported:
+        - `keydb://` creates a TCP socket connection. (KeyDB)
+        - `keydbs://` creates a SSL wrapped TCP socket connection. (KeyDB)
+        - `dfly://` creates a TCP socket connection. (Dragonfly)
+        - `dflys://` creates a SSL wrapped TCP socket connection. (Dragonfly)
         - `redis://` creates a TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/redis>
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
@@ -407,13 +413,17 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         For example::
             keydb://[[username]:[password]]@localhost:6379/0
             keydbs://[[username]:[password]]@localhost:6379/0
+            dfly://[[username]:[password]]@localhost:6379/0
+            dflys://[[username]:[password]]@localhost:6379/0
             redis://[[username]:[password]]@localhost:6379/0
             rediss://[[username]:[password]]@localhost:6379/0
             unix://[[username]:[password]]@/path/to/socket.sock?db=0
 
-        Five URL schemes are supported:
-        - `keydb://` creates a TCP socket connection.
-        - `keydbs://` creates a SSL wrapped TCP socket connection.
+        Seven URL schemes are supported:
+        - `keydb://` creates a TCP socket connection. (KeyDB)
+        - `keydbs://` creates a SSL wrapped TCP socket connection. (KeyDB)
+        - `dfly://` creates a TCP socket connection. (Dragonfly)
+        - `dflys://` creates a SSL wrapped TCP socket connection. (Dragonfly)
         - `redis://` creates a TCP socket connection. See more at:
           <https://www.iana.org/assignments/uri-schemes/prov/redis>
         - `rediss://` creates a SSL wrapped TCP socket connection. See more at:
