@@ -179,7 +179,7 @@ class TaskQueue:
         verbose_results: typing.Optional[bool] = False,
         truncate_logs: typing.Optional[bool] = True,
         logging_max_length: typing.Optional[int] = 500,
-        silenced_functions: typing.Optional[typing.List[str]] = None, # Don't log these functions
+        silenced_functions: typing.Optional[typing.List[typing.Union[str, typing.Tuple[str, typing.List[str]]]]] = None, # Don't log these functions
         heartbeat_ttl: typing.Optional[int] = None, # 10,
         is_leader_process: typing.Optional[bool] = None,
         function_tracker_enabled: typing.Optional[bool] = None,
@@ -332,12 +332,13 @@ class TaskQueue:
         return self.settings.worker.is_silenced_function(name, stage = stage)
 
 
-    def add_silenced_functions(self, *functions):
+    def add_silenced_functions(self, *functions: typing.Iterable[typing.Union[str, typing.Tuple[str, typing.List[str]]]]):
         """
         Adds functions to the list of silenced functions.
         """
         for func in functions:
-            self.settings.worker.add_function_to_silenced(func)
+            name, stages = (func, None) if isinstance(func, str) else func
+            self.settings.worker.add_function_to_silenced(name, silenced_stages = stages)
 
     def logger(self, job: 'Job' = None, kind: str = "enqueue", job_id: typing.Optional[str] = None,):
         """
