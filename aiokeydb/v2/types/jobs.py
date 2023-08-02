@@ -53,6 +53,8 @@ class CronJob(BaseModel):
     callback: typing.Optional[typing.Union[str, typing.Callable]] = None
     callback_kwargs: typing.Optional[dict] = Field(default_factory=dict)
 
+    bypass_lock: typing.Optional[bool] = None
+
     @property
     def function_name(self) -> str:
         """
@@ -87,6 +89,9 @@ class CronJob(BaseModel):
         if self.callback:
             enqueue_kwargs['job_callback'] = self.callback
             enqueue_kwargs['job_callback_kwargs'] = self.callback_kwargs
+        
+        if self.bypass_lock is not None:
+            enqueue_kwargs['bypass_lock'] = self.bypass_lock
 
         if exclude_none:
             enqueue_kwargs = {
@@ -342,6 +347,7 @@ class Job(BaseModel):
     # Allow for passing in a callback function to be called after the job is run
     job_callback: typing.Optional[typing.Union[str, typing.Callable]] = None
     job_callback_kwargs: typing.Optional[dict] = Field(default_factory=dict)
+    bypass_lock: typing.Optional[bool] = None
 
     if typing.TYPE_CHECKING:
         queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None

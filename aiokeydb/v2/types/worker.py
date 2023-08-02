@@ -338,6 +338,7 @@ class Worker:
         # self.logger(kind = "scheduled").info(f"❤ Sending [{self.worker_id}] heartbeat to queue {self.queue_name}")
         await self.queue.add_heartbeat(
             worker_id = self.worker_id,
+            worker_name = self.name,
             worker_attributes = self.worker_attributes,
             heartbeat_ttl = ttl,
         )

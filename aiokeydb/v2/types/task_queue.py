@@ -125,6 +125,10 @@ class QueueStats(BaseModel):
         return f"{self.prefix}:{self.name}:heartbeat"
     
     @lazyproperty
+    def worker_names_key(self) -> str:
+        return f"{self.prefix}:{self.name}:workernames"
+
+    @lazyproperty
     def function_tracker_key(self) -> str:
         return f"{self.prefix}:{self.name}:functiontracker"
     
@@ -415,6 +419,17 @@ class TaskQueue:
         # await pipe.close(close_connection_pool = False)
         # del pipe
 
+    @asynccontextmanager
+    async def op_sephamore(self, disabled: typing.Optional[bool] = None, **kwargs):
+        """
+        Allow certain operations to be run concurrently without exceeding the max_concurrency.
+        """
+        if disabled is not True:
+            async with self._op_sem:
+                yield
+        else:
+            yield
+
     def serialize(self, job: Job):
         """
         Dumps a job.
@@ -690,7 +705,8 @@ class TaskQueue:
         return await self.ctx.async_exists(job_id)
 
     async def _get_job_by_id(self, job_id):
-        async with self._op_sem:
+        # async with self._op_sem:
+        async with self.op_sephamore():
             return self.deserialize(await self.ctx.async_get(job_id))
 
     async def wait_for_job_completion(self, job_id: str, results_only: typing.Optional[bool] = False, interval: float = 0.5) -> typing.Any:
@@ -710,7 +726,8 @@ class TaskQueue:
         """
         Abort a job.
         """
-        async with self._op_sem:
+        # async with self._op_sem:
+        async with self.op_sephamore(job.bypass_lock):
             async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
             # async with self.pipeline(transaction = True) as pipe:
                 dequeued, *_ = await (
@@ -929,7 +946,8 @@ class TaskQueue:
 
         await self._before_enqueue(job)
 
-        async with self._op_sem:
+        # async with self._op_sem:
+        async with self.op_sephamore(job.bypass_lock):
             if not await self._enqueue_script(
                     keys=[job.incomplete_key, job.id, job.queued_key, job.abort_id],
                     args=[self.serialize(job), job.scheduled],
@@ -1723,6 +1741,16 @@ class TaskQueue:
             *_, worker_uuid = key.split(":")
             worker_ids.append(worker_uuid)
         return worker_ids
+    
+    async def get_worker_names(self) -> typing.List[str]:
+        """
+        Get all worker names
+        """
+        worker_names = []
+        for key in await self.ctx.async_zrangebyscore(self.worker_names_key, now(), "inf"):
+            key: bytes = key.decode("utf-8")
+            worker_names.append(key)
+        return worker_names
 
     async def info(self, jobs: bool = False, offset: int = 0, limit: int = 10):
         # pylint: disable=too-many-locals
@@ -1790,6 +1818,7 @@ class TaskQueue:
     async def add_heartbeat(
         self, 
         worker_id: str, 
+        worker_name: str,
         worker_attributes: typing.Dict[str, typing.Any] = None,
         heartbeat_ttl: typing.Optional[int] = None,
     ):
@@ -1807,6 +1836,9 @@ class TaskQueue:
                 .zremrangebyscore(self.heartbeat_key, 0, current)
                 .zadd(self.heartbeat_key, {worker_id: current + millis(heartbeat_ttl)})
                 .expire(self.heartbeat_key, heartbeat_ttl)
+                .zremrangebyscore(self.worker_names_key, 0, current)
+                .zadd(self.worker_names_key, {worker_name: current + millis(heartbeat_ttl)})
+                .expire(self.worker_names_key, heartbeat_ttl)
                 .execute()
             )
         self.active_workers = await self.get_worker_ids()
@@ -2028,6 +2060,30 @@ class TaskQueue:
     """
     Alias Properties
     """
+
+    @property
+    async def anum_workers(self) -> int:
+        """
+        Returns the number of workers
+        """
+        return await self.ctx.async_client.zcount(
+            self.heartbeat_key, 1, 'inf',
+        )
+
+    @property
+    async def aworker_ids(self) -> typing.List[str]:
+        """
+        Returns all worker ids
+        """
+        return await self.get_worker_ids()
+
+    @property
+    async def aworker_names(self) -> typing.List[str]:
+        """
+        Returns all worker names
+        """
+        return await self.get_worker_names()
+
     # Properties
     @lazyproperty
     def node_name(self) -> str: return self._stats.node_name
@@ -2068,6 +2124,8 @@ class TaskQueue:
     def management_queue_key(self) -> str: return self._stats.management_queue_key
     @lazyproperty
     def heartbeat_key(self) -> str: return self._stats.heartbeat_key
+    @lazyproperty
+    def worker_names_key(self) -> str: return self._stats.worker_names_key
     @lazyproperty
     def abort_id_prefix(self) -> str: return self._stats.abort_id_prefix
 
