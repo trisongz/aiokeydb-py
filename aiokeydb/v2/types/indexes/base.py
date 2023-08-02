@@ -48,6 +48,7 @@ _base_keys = [
 
 if TYPE_CHECKING:
     from aiokeydb.v2 import KeyDBSession
+    from aiokeydb.v2.types.serializer import BaseSerializer
 
 
 DT = TypeVar('DT')
@@ -76,6 +77,8 @@ class BaseKDBIndex(ABC):
         kdb_type: Optional[str] = None,
         expiration: Optional[int] = None, 
         name_prefix_enabled: Optional[bool] = None,
+        serializer: Optional[Type['BaseSerializer']] = None,
+        serialization_enabled: Optional[bool] = True, 
         **kwargs
     ):
         """
@@ -91,8 +94,11 @@ class BaseKDBIndex(ABC):
         if name is not None: self.name = name
         if name_prefix is not None: self.name_prefix = name_prefix
         if self.kdb is None: self.kdb = self.get_session(name = f'{self.name_key}:kdb')
-
-        self.srl = self.kdb.serializer
+        self.srl = None
+        if serialization_enabled:
+            if serializer is None: serializer = self.kdb.serializer
+            self.srl = serializer
+        # self.srl = self.kdb.serializer if serialization_enabled else None
         self.enc = self.kdb.encoder
         
         self._idx = 0

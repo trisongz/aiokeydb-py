@@ -115,6 +115,16 @@ class KDBDict(BaseKDBIndex):
         key = str(key)
         return f'{self.name_lookup_key}:{key}' if self.name_prefix_enabled and self.name_lookup_key not in key else key
 
+    def get_match_key(self, key: Optional[str] = None) -> str:
+        """
+        Returns the match key for the given key
+        """
+        if key is None: return self.name_match_key
+        key = str(key)
+        if '*' not in key: key = f'{key}*'
+        return f'{self.name_key}:{key}' if self.name_prefix_enabled and self.name_key not in key else key
+
+
     def hset(self, field: str, value: Any, key: Optional[str] = None, ex: Optional[int] = None) -> int:
         """
         Sets the value for the given key
@@ -418,13 +428,13 @@ class KDBDict(BaseKDBIndex):
         """
         Returns an iterator for the dict
         """
-        yield from self.items()
+        yield from iter(self.items())
     
     async def aiter(self) -> AsyncIterator[Tuple[str, Any]]:
         """
         Returns an iterator for the dict
         """
-        async for item in self.aitems():
+        async for item in iter(await self.aitems()):
             yield item
 
     def clear(self, key: Optional[str] = None, lookup: Optional[bool] = None) -> None:
@@ -814,7 +824,7 @@ class KDBDict(BaseKDBIndex):
         return f'<{self.__class__.__name__} builder={self.name}, name_key={self.name_key}, primary_key={self.primary_key}, index_key={self.name_key}, match_key={self.name_match_key}, name_prefix_enabled={self.name_prefix_enabled}, keys={len(self)}, uri={self.kdb.uri}>'
     
     @classmethod
-    def validate(cls, v: Union['KDBDict', Dict[str, Any], str, Iterable[Any], Any]) -> KDBObjectT:
+    def validate(cls, v: Union['KDBDict', Dict[str, Any], str, Iterable[Any], Any]) -> KDBDict:
         """
         Validates the given value
         """
@@ -1013,6 +1023,27 @@ class AsyncKDBDict(KDBDict):
             lookup_keys += await self.lvalues
         return all(key in lookup_keys for key in keys)
 
+    async def get_keys(self, key: Optional[str] = None, **kwargs) -> List[str]:
+        """
+        Returns the keys for the given key
+        """
+        match = self.get_match_key(key)
+        keys = []
+        # from lazyops.utils import logger
+        # logger.warning(f'getting keys: {match}')
+        async for key in self.kdb.async_scan_iter(match = match, **kwargs):
+            keys.append(key.decode())
+        return keys
+    
+    async def get_items(self, key: Optional[str] = None, **kwargs) -> Dict[str, Any]:
+        """
+        Returns the keys for the given key
+        """
+        match = self.get_match_key(key)
+        items = {}
+        async for key in self.kdb.async_scan_iter(match = match, **kwargs):
+            items[key.decode()] = await self.kdb.async_get(key)
+        return items
     
 
 KDBDict.register(dict)
