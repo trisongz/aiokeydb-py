@@ -12,6 +12,7 @@ from aiokeydb.v2.types import BaseSettings, validator, lazyproperty, KeyDBUri
 from aiokeydb.v2.types.static import TaskType
 from aiokeydb.v2.serializers import SerializerType
 from aiokeydb.v2.utils.queue import run_in_executor
+from aiokeydb.v2.utils.cron import validate_cron_schedule
 
 if TYPE_CHECKING:
     from aiokeydb.v2.types.jobs import CronJob
@@ -41,64 +42,6 @@ class WorkerTasks(object):
         'abort': [],
     }
     queue_func: Union[Callable, 'TaskQueue'] = None
-
-# '*/5 * * * *' # every 5 minutes
-# '*/10 * * * *' # every 10 minutes
-
-# _schedule_fmt = {
-#     'minutes': '*/{value} * * * *',
-#     'hours': '* * */{value} * * *',
-#     'days': '* * * */{value} * *',
-#     'weeks': '* * * * */{value} *',
-# }
-
-# def validate_cron_schedule(cron_schedule: str) -> str:
-#     """
-#     Validates a cron schedule and tries to fix it if it's invalid
-#     super basic, but it works
-#     """
-#     import croniter
-#     if croniter.croniter.is_valid(cron_schedule):
-#         return cron_schedule
-#     cron_schedule = cron_schedule.lower()
-#     if 'every' in cron_schedule:
-#         cron_schedule = cron_schedule.replace('every', '').strip()
-#     value, unit = cron_schedule.split(' ')
-#     if not unit.endswith('s'): unit += 's'
-#     return _schedule_fmt[unit].format(value=value)
-
-
-_time_pattern = re.compile(r'every (\d+) (\w+)(?: and (\d+) (\w+))?')
-
-def validate_cron_schedule(cron_schedule: str) -> str:
-    """
-    Convert natural language to cron format using regex patterns
-    """
-    import croniter
-    if croniter.croniter.is_valid(cron_schedule):
-        return cron_schedule
-    # Convert natural language to cron format using regex patterns
-    time_units = {
-        'minutes': '0',
-        'hours': '*',
-        'days': '*',
-        'weeks': '*',
-        'months': '*'
-    }
-    match = _time_pattern.match(cron_schedule)
-    if not match:
-        raise ValueError("Invalid cron expression.")
-    num1, unit1, num2, unit2 = match.groups()
-    if not unit1.endswith('s'): unit1 += 's'
-    if unit2 and not unit2.endswith('s'): unit2 += 's'
-    if unit1 not in time_units or (unit2 and unit2 not in time_units):
-        raise ValueError("Invalid time unit in cron expression.")
-
-    time_units[unit1] = f'*/{num1}'
-    if unit2: time_units[unit2] = f'*/{num2}'
-    cron_expression = f"{time_units['minutes']} {time_units['hours']} {time_units['days']} {time_units['months']} {time_units['weeks']}"
-    return cron_expression.strip()
-
 
 
 class KeyDBWorkerSettings(BaseSettings):
@@ -157,6 +100,9 @@ class KeyDBWorkerSettings(BaseSettings):
     heartbeat_timer: Optional[int] = 5
     broadcast_timer: Optional[int] = 10
 
+    # Misc
+    include_executor_function: Optional[bool] = False
+
     class Config:
         case_sensitive = False
         env_prefix = 'KEYDB_WORKER_'
@@ -207,7 +153,7 @@ class KeyDBWorkerSettings(BaseSettings):
         that are enabled from `KOpsWorkerParams.functions`.
         """
         if verbose is None: verbose = self.debug_enabled
-        worker_ops = [run_in_executor]
+        worker_ops = [run_in_executor] if self.include_executor_function else []
         worker_ops.extend(self.tasks.functions)
         if verbose:
             for f in worker_ops:
@@ -343,6 +289,7 @@ class KeyDBWorkerSettings(BaseSettings):
         verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         _fx: Optional[Callable] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -363,6 +310,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         if verbose is None: verbose = self.debug_enabled
         if obj is not None:
+            if disabled is True: return
             name = name or obj.__name__
             if callable(obj):
                 self.tasks.context_funcs[name] = (obj, kwargs)
@@ -376,6 +324,7 @@ class KeyDBWorkerSettings(BaseSettings):
             return
         
         if _fx is not None:
+            if disabled is True: return
             name = name or _fx.__name__
             self.tasks.context_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered context function {name}: {_fx}")
@@ -386,6 +335,7 @@ class KeyDBWorkerSettings(BaseSettings):
 
         # Create a wrapper
         def wrapper(func: Callable):
+            if disabled is True: return func
             func_name = name or func.__name__
             self.tasks.context_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered context function {func_name}: {func}")
@@ -404,6 +354,7 @@ class KeyDBWorkerSettings(BaseSettings):
         verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -416,6 +367,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         if verbose is None: verbose = self.debug_enabled
         if obj is not None:
+            if disabled is True: return
             name = name or obj.__name__
             self.tasks.dependencies[name] = (obj, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {obj}")
@@ -425,6 +377,7 @@ class KeyDBWorkerSettings(BaseSettings):
             return
         
         if _fx is not None:
+            if disabled is True: return
             name = name or _fx.__name__
             self.tasks.dependencies[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered dependency {name}: {_fx}")
@@ -435,6 +388,7 @@ class KeyDBWorkerSettings(BaseSettings):
         
         # Create a wrapper
         def wrapper(func: Callable):
+            if disabled is True: return func
             func_name = name or func.__name__
             self.tasks.dependencies[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered depency{func_name}: {func}")
@@ -452,6 +406,7 @@ class KeyDBWorkerSettings(BaseSettings):
         verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -476,6 +431,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         if verbose is None: verbose = self.debug_enabled
         if _fx is not None:
+            if disabled is True: return
             name = name or _fx.__name__
             self.tasks.startup_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered startup function {name}: {_fx}")
@@ -485,6 +441,7 @@ class KeyDBWorkerSettings(BaseSettings):
             return
         
         def decorator(func: Callable):
+            if disabled is True: return func
             func_name = name or func.__name__
             self.tasks.startup_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered startup function {func_name}: {func}")
@@ -502,6 +459,7 @@ class KeyDBWorkerSettings(BaseSettings):
         verbose: Optional[bool] = None,
         _fx: Optional[Callable] = None,
         silenced: Optional[bool] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -509,6 +467,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         if verbose is None: verbose = self.debug_enabled
         if _fx is not None:
+            if disabled is True: return
             name = name or _fx.__name__
             self.tasks.shutdown_funcs[name] = (_fx, kwargs)
             if verbose: logger.info(f"Registered shutdown function {name}: {_fx}")
@@ -518,6 +477,7 @@ class KeyDBWorkerSettings(BaseSettings):
             return
         
         def decorator(func: Callable):
+            if disabled is True: return func
             func_name = name or func.__name__
             self.tasks.shutdown_funcs[func_name] = (func, kwargs)
             if verbose: logger.info(f"Registered shutdown function {func_name}: {func}")
@@ -534,6 +494,7 @@ class KeyDBWorkerSettings(BaseSettings):
         verbose: Optional[bool] = None,
         silenced: Optional[bool] = None,
         silenced_stages: Optional[List[str]] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -548,6 +509,7 @@ class KeyDBWorkerSettings(BaseSettings):
         
         """
         if _fx is not None:
+            if disabled is True: return
             name = name or _fx.__name__
             if name:
                 self.tasks.functions.append((name, _fx))
@@ -561,6 +523,7 @@ class KeyDBWorkerSettings(BaseSettings):
         
         def decorator(func: Callable):
             nonlocal name
+            if disabled is True: return func
             func_name = name or func.__name__
             if name:
                 self.tasks.functions.append((name, func))
@@ -652,6 +615,7 @@ class KeyDBWorkerSettings(BaseSettings):
         failed_results: Optional[list] = None,
         queue_func: Optional[Union[Callable, 'TaskQueue']] = None,
         silenced_stages: Optional[List[str]] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -664,6 +628,7 @@ class KeyDBWorkerSettings(BaseSettings):
         if verbose is None: verbose = self.debug_enabled
         if timeout is None: timeout = self.job_timeout
         def decorator(func: Callable):
+            if disabled: return func
             self.tasks.functions.append(func)
             name = func.__name__
             if verbose: logger.info(f"Registered fallback function {name}")
@@ -696,6 +661,7 @@ class KeyDBWorkerSettings(BaseSettings):
         default_kwargs: Optional[dict] = None,
         callback: Optional[Union[str, Callable]] = None,
         callback_kwargs: Optional[dict] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -704,9 +670,11 @@ class KeyDBWorkerSettings(BaseSettings):
             {'coroutine': refresh_spot_data, 'name': 'refresh_spot_data', 'minute': {10, 30, 50}},
         }
         """
+        
         if verbose is None: verbose = self.debug_enabled
         if schedule and isinstance(schedule, str): schedule = validate_cron_schedule(schedule)
         if _fx is not None:
+            if disabled is True: return
             cron = {'function': _fx, 'cron_name': name, 'default_kwargs': default_kwargs, 'cron': schedule, 'silenced': silenced, 'callback': callback, **kwargs}
             if callback_kwargs: cron['callback_kwargs'] = callback_kwargs
 
@@ -718,6 +686,7 @@ class KeyDBWorkerSettings(BaseSettings):
         
         def decorator(func: Callable):
             nonlocal schedule
+            if disabled is True: return func
             cron = {'function': func, 'cron': schedule, 'cron_name': name, 'default_kwargs': default_kwargs, 'silenced': silenced, 'callback': callback, **kwargs}
             if callback_kwargs: cron['callback_kwargs'] = callback_kwargs
             
@@ -735,6 +704,7 @@ class KeyDBWorkerSettings(BaseSettings):
         name: Optional[str] = None,
         obj: Optional[Any] = None,
         verbose: Optional[bool] = None,
+        disabled: Optional[bool] = False,
         **kwargs,
     ):
         """
@@ -749,6 +719,7 @@ class KeyDBWorkerSettings(BaseSettings):
         """
         task = TaskType(task) if isinstance(task, str) else task
         if obj is not None:
+            if disabled is True: return
             if task in {TaskType.default, TaskType.function}:
                 return self.add_function(_fx = obj, name = name, verbose = verbose, **kwargs)
             if task == TaskType.cronjob:
@@ -759,6 +730,7 @@ class KeyDBWorkerSettings(BaseSettings):
                 return self.add_dependency(obj = obj, name = name, verbose = verbose, **kwargs)
         
         def wrapper(func: Callable):
+            if disabled is True: return func
             if task in {TaskType.default, TaskType.function}:
                 return self.add_function(_fx = func, name = name, verbose = verbose, **kwargs)
             if task == TaskType.cronjob:
