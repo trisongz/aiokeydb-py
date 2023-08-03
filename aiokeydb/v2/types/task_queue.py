@@ -52,6 +52,8 @@ from aiokeydb.v2.utils import set_ulimits, get_ulimits
 from aiokeydb.v2.backoff import default_backoff
 from redis.asyncio.retry import Retry
 
+from typing import TYPE_CHECKING, overload
+
 
 
 class QueueStats(BaseModel):
@@ -909,12 +911,36 @@ class TaskQueue:
         """
         asyncio.create_task(self._deferred(job_or_func, wait_time = wait_time, **kwargs))
 
+    @overload
+    async def enqueue(
+        self, 
+        job_or_func: typing.Union[Job, str, typing.Callable],
+        key: typing.Optional[str] = None,
+        timeout: typing.Optional[int] = None,
+        retries: typing.Optional[int] = None,
+        ttl: typing.Optional[int] = None,
+        retry_delay: typing.Optional[int] = None,
+        retry_backoff: typing.Optional[int] = None,
+        worker_id: typing.Optional[str] = None,
+        worker_name: typing.Optional[str] = None,
+        job_callback: typing.Optional[typing.Callable] = None,
+        job_callback_kwargs: typing.Optional[typing.Dict] = None,
+        **kwargs
+    ) -> typing.Optional[Job]:
+        """
+        Enqueue a job by instance or string.
+
+        Kwargs can be arguments of the function or properties of the job.
+        If a job instance is passed in, it's properties are overriden.
+        """
+        ...
+
 
     async def enqueue(
         self, 
         job_or_func: typing.Union[Job, str, typing.Callable],
         **kwargs
-    ):
+    ) -> typing.Optional[Job]:
         """
         Enqueue a job by instance or string.
 
@@ -975,6 +1001,39 @@ class TaskQueue:
             )
 
         return job
+
+    @overload
+    async def apply(
+        self, 
+        job_or_func: typing.Union[Job, str, typing.Callable],
+        key: typing.Optional[str] = None,
+        timeout: typing.Optional[int] = None,
+        retries: typing.Optional[int] = None,
+        ttl: typing.Optional[int] = None,
+        retry_delay: typing.Optional[int] = None,
+        retry_backoff: typing.Optional[int] = None,
+        worker_id: typing.Optional[str] = None,
+        worker_name: typing.Optional[str] = None,
+        job_callback: typing.Optional[typing.Callable] = None,
+        job_callback_kwargs: typing.Optional[typing.Dict] = None,
+
+        broadcast: typing.Optional[bool] = None,
+        worker_names: typing.Optional[typing.List[str]] = None,
+        worker_selector: typing.Optional[typing.Callable] = None,
+        worker_selector_args: typing.Optional[typing.List] = None,
+        worker_selector_kwargs: typing.Optional[typing.Dict] = None,
+        workers_selected: typing.Optional[typing.List[typing.Dict[str, str]]] = None,
+        return_all_results: typing.Optional[bool] = False,
+        
+        **kwargs
+    ) -> typing.Optional[typing.Any]:
+        """
+        Enqueue a job and wait for its result.
+
+        If the job is successful, this returns its result.
+        If the job is unsuccessful, this raises a JobError.
+        """
+        ...
 
     async def apply(
         self, 
