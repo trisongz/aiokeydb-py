@@ -78,9 +78,11 @@ def get_func_full_name(func: typing.Union[str, typing.Callable]) -> str:
 
 def get_and_log_exc(
     job: typing.Optional['Job'] = None, 
-    func: typing.Optional[typing.Union[str, typing.Callable]] = None
+    func: typing.Optional[typing.Union[str, typing.Callable]] = None,
+    chain: typing.Optional[bool] = True,
+    limit: typing.Optional[int] = 2,
 ):
-    error = traceback.format_exc()
+    error = traceback.format_exc(chain=chain, limit=limit)
     err_msg = f'node={get_hostname()}, {error}'
     if func: err_msg = f'func={get_func_name(func)}, {err_msg}'
     elif job: err_msg = f'job={job.short_repr}, {err_msg}'
