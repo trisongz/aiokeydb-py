@@ -323,7 +323,19 @@ class AsyncRetryablePipeline(AsyncPipeline):
         def rpoplpush(self, src, dst) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def rpush(self, name: _Value, *values: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def rpushx(self, name, value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
-
+        def hmget(self, name: _Key, keys: _Value | Iterable[_Value]) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hmset(self, name: _Key, mapping: Mapping[_Key, _Value]) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hset(self, name: _Key, key: _Key, value: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hsetnx(self, name: _Key, key: _Key, value: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hstrlen(self, name: _Key, key: _Key) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hvals(self, name: _Key) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hscan(self, name: _Key, cursor: int = 0, match: _Value | None = None, count: int | None = None) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hdel(self, name: _Key, *keys: _Value) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hget(self, name: _Key, key: _Key) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hgetall(self, name: _Key) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hexists(self, name: _Key, key: _Key) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hincrby(self, name: _Key, key: _Key, amount: int) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
+        def hincrbyfloat(self, name: _Key, key: _Key, amount: float) -> 'AsyncRetryablePipeline': ...  # type: ignore[override]
         def zadd(  # type: ignore[override]
         self,
         name: _Key,

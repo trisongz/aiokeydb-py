@@ -129,6 +129,10 @@ class QueueStats(BaseModel):
     @lazyproperty
     def worker_names_key(self) -> str:
         return f"{self.prefix}:{self.name}:workernames"
+    
+    @lazyproperty
+    def worker_map_key(self) -> str:
+        return f"{self.prefix}:{self.name}:workermap"
 
     @lazyproperty
     def function_tracker_key(self) -> str:
@@ -1810,6 +1814,17 @@ class TaskQueue:
             key: bytes = key.decode("utf-8")
             worker_names.append(key)
         return worker_names
+    
+    async def get_worker_map(self) -> typing.Dict[str, str]:
+        """
+        Get all worker ids
+        """
+        worker_map = {}
+        for worker_name, worker_id in (await self.ctx.async_client.hgetall(self.worker_map_key)).items():
+            worker_id = worker_id.decode("utf-8")
+            worker_name = worker_name.decode("utf-8")
+            worker_map[worker_name] = worker_id
+        return worker_map
 
     async def info(self, jobs: bool = False, offset: int = 0, limit: int = 10):
         # pylint: disable=too-many-locals
@@ -1897,7 +1912,10 @@ class TaskQueue:
                 .expire(self.heartbeat_key, heartbeat_ttl)
                 .zremrangebyscore(self.worker_names_key, 0, current)
                 .zadd(self.worker_names_key, {worker_name: current + millis(heartbeat_ttl)})
+                # .zadd(self.worker_names_key, {worker_name: worker_id})
                 .expire(self.worker_names_key, heartbeat_ttl)
+                .hmset(self.worker_map_key, {worker_name: worker_id})
+                .expire(self.worker_map_key, heartbeat_ttl)
                 .execute()
             )
         self.active_workers = await self.get_worker_ids()
@@ -2142,6 +2160,13 @@ class TaskQueue:
         Returns all worker names
         """
         return await self.get_worker_names()
+    
+    @property
+    async def aworker_map(self) -> typing.Dict[str, str]:
+        """
+        Returns all worker ids
+        """
+        return await self.get_worker_map()
 
     # Properties
     @lazyproperty
@@ -2185,6 +2210,8 @@ class TaskQueue:
     def heartbeat_key(self) -> str: return self._stats.heartbeat_key
     @lazyproperty
     def worker_names_key(self) -> str: return self._stats.worker_names_key
+    @lazyproperty
+    def worker_map_key(self) -> str: return self._stats.worker_map_key
     @lazyproperty
     def abort_id_prefix(self) -> str: return self._stats.abort_id_prefix
 
