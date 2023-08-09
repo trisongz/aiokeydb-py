@@ -394,8 +394,10 @@ class KDBDict(BaseKDBIndex):
             # Use the greater expiration
             expiration = max(expiration, self.expiration)
         name_prefix = kwargs.pop('name_prefix', None) or self.name_prefix
-        serialization_enabled = kwargs.pop('serialization_enabled', None) or self.serialization_enabled
-        serializer = kwargs.pop('serializer', None) or self.srl
+        serialization_enabled = kwargs.pop('serialization_enabled', self.serialization_enabled)
+        # self.serialization_enabled
+        serializer = kwargs.pop('serializer', self.srl)
+        #  or self.srl
         return self.__class__(
             kdb = self.kdb, 
             kdb_type = self.kdb_type,
