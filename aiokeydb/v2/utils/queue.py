@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 _NodeName: str = None
 _ThreadPool: futures.ThreadPoolExecutor = None
 
+TRACE_CHAIN_LIMIT: typing.Optional[int] = None
+
 if typing.TYPE_CHECKING:
     from aiokeydb.v2.types.jobs import Job
 
@@ -80,7 +82,7 @@ def get_and_log_exc(
     job: typing.Optional['Job'] = None, 
     func: typing.Optional[typing.Union[str, typing.Callable]] = None,
     chain: typing.Optional[bool] = True,
-    limit: typing.Optional[int] = 2,
+    limit: typing.Optional[int] = TRACE_CHAIN_LIMIT,
 ):
     error = traceback.format_exc(chain=chain, limit=limit)
     err_msg = f'node={get_hostname()}, {error}'
