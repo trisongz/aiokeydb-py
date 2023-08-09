@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 from abc import ABC
+
 from typing import (
     Optional, 
     Any, 
@@ -32,6 +34,8 @@ _base_keys = [
     'is_numeric',
     'is_lookup_index',
     'auto_expire',
+    'serializer',
+    'serialization_enabled',
     'name_prefix_enabled',
     'name_match_key',
     'name_count_key',
@@ -41,6 +45,7 @@ _base_keys = [
     'srl',
     'enc',
     'idx',
+    'log',
     '_keys',
 ]
 
@@ -54,6 +59,15 @@ if TYPE_CHECKING:
 DT = TypeVar('DT')
 AmountT = Union[float, int]
 Numeric = Union[int, float]
+
+_logger = None
+
+def get_logger():
+    global _logger
+    if _logger is None:
+        from aiokeydb.v2.utils.logs import logger
+        _logger = logger
+    return _logger
 
 class BaseKDBIndex(ABC):
     """
@@ -94,10 +108,12 @@ class BaseKDBIndex(ABC):
         if name is not None: self.name = name
         if name_prefix is not None: self.name_prefix = name_prefix
         if self.kdb is None: self.kdb = self.get_session(name = f'{self.name_key}:kdb')
+        self.log = get_logger()
         self.srl = None
-        if serialization_enabled:
-            if serializer is None: serializer = self.kdb.serializer
-            self.srl = serializer
+        self.serialization_enabled = serialization_enabled
+        # if self.serialization_enabled:
+        if serializer is None: serializer = self.kdb.serializer
+        self.srl = serializer
         # self.srl = self.kdb.serializer if serialization_enabled else None
         self.enc = self.kdb.encoder
         
@@ -112,6 +128,7 @@ class BaseKDBIndex(ABC):
         """
         from aiokeydb.v2 import KeyDBClient
         return KeyDBClient.get_session(name = name, **kwargs)
+
 
     def postinit(self, **kwargs):
         """
@@ -156,17 +173,53 @@ class BaseKDBIndex(ABC):
         """
         return f'{self.name_key}:{key}' if self.name_prefix_enabled and self.name_key not in key else key
 
+    def is_primitive(self, value: Any, include_bytes: Optional[bool] = True) -> bool:
+        """
+        Returns whether the given value is a primitive
+        """
+        if include_bytes and isinstance(value, bytes): return True
+        return isinstance(value, (str, int, float))
+
     def encode(self, value: Any) -> bytes:
         """
         Encodes the value
         """
-        return self.srl.dumps(value) if self.srl else self.enc.encode(value)
+        if self.is_primitive(value): return value
+        with contextlib.suppress(Exception):
+            return self.srl.dumps(value) if self.serialization_enabled else self.enc.encode(value)
+        with contextlib.suppress(Exception):
+            return self.enc.encode(value)
+        
+        self.log.warning(f"Failed to Encode value: ({type(value)}) {value}")
+        return value
+        
+        # try:
+        #     return self.srl.dumps(value) if self.serialization_enabled else self.enc.encode(value)
+        # except Exception as e:
+        #     self.log.warning(f"Failed to Encode value: ({type(value)}) {value}: {e}")
+        #     raise e
+        # val = self.srl.dumps(value) if self.serialization_enabled else self.enc.encode(value)
+        # self.log.warning(f"Encoded value: ({type(value)}) {value} -> ({type(val)}) {val}")
+        # return val
     
     def decode(self, value: bytes) -> Any:
         """
         Decodes the value
         """
-        return self.srl.loads(value) if self.srl else self.enc.decode(value)
+        if self.is_primitive(value, False): return value
+        with contextlib.suppress(Exception):
+            return self.srl.loads(value) if self.serialization_enabled else self.enc.decode(value)
+        with contextlib.suppress(Exception):
+            return self.enc.decode(value)
+
+        # try:
+        #     return self.srl.loads(value) if self.serialization_enabled else self.enc.decode(value)
+        # except Exception as e:
+        self.log.warning(f"Failed to Decode value: ({type(value)}) {value}")
+        return value
+
+        # return val
+        # return self.srl.loads(value) if self.serialization_enabled else self.enc.decode(value)
 
 
     def rm(self, key: str) -> None:
@@ -338,7 +391,12 @@ class BaseKDBIndex(ABC):
         """
         key = self.get_key(key) if key else self.name_count_key
         func = self.kdb.async_incrbyfloat if isinstance(amount, float) else self.kdb.async_incrby
+        # try:
         return await func(key, amount = amount)
+        # except Exception as e:
+        #     value = await self.kdb.async_get(key)
+        #     self.log.trace(f"Failed to increment: {key} ({value})", e)
+        #     raise e
     
     def decr(self, amount: AmountT = 1, key: Optional[str] = None) -> AmountT:
         """

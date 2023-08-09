@@ -1083,6 +1083,7 @@ class TaskQueue:
             workers_selected = workers_selected,
         )
         return results if return_all_results else results[0]
+        # (results[0] if isinstance(results, list) else results)
     
     async def select_workers(
         self,
