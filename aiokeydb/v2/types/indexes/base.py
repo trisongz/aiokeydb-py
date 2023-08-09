@@ -471,13 +471,13 @@ class BaseKDBIndex(ABC):
         """
         Decrements the given key
         """
-        return self.hincr(key, field, amount = -amount)
+        return self.hincr(key = key, field = field, amount = -amount)
     
     async def ahdecr(self, key: str, field: str, amount: AmountT = 1) -> AmountT:
         """
         Decrements the given key
         """
-        return await self.ahincr(key, field, amount = -amount)
+        return await self.ahincr(key = key, field = field, amount = -amount)
     
     
     def hkeys(self, key: str) -> List[str]:
