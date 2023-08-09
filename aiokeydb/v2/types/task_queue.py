@@ -11,6 +11,7 @@ from contextlib import asynccontextmanager, suppress
 from lazyops.utils.logs import default_logger as logger
 # from lazyops.utils import logger
 from lazyops.utils.serialization import ObjectEncoder
+from lazyops.utils.helpers import create_background_task
 from aiokeydb.v2.types.base import BaseModel, Field, validator
 from aiokeydb.v2.types.base import KeyDBUri, lazyproperty
 from aiokeydb.v2.types.session import KeyDBSession
@@ -54,6 +55,8 @@ from redis.asyncio.retry import Retry
 
 from typing import TYPE_CHECKING, overload
 
+if TYPE_CHECKING:
+    from aiokeydb.v2.core import AsyncPipelineT
 
 
 class QueueStats(BaseModel):
@@ -149,6 +152,135 @@ class QueueStats(BaseModel):
     def node_name(self) -> str:
         get_hostname()
 
+class PushQueue:
+    def __init__(
+        self, 
+        ctx: KeyDBSession,
+        push_to_queue_enabled: typing.Optional[bool] = None,
+        push_to_queue_key: typing.Optional[str] = None,
+        push_to_queue_ttl: typing.Optional[int] = None,
+        **kwargs
+    ):
+        self.ctx = ctx
+        self.queue_key = push_to_queue_key
+        self.enabled = push_to_queue_enabled and self.queue_key is not None
+        self.ttl = push_to_queue_ttl or 600
+        self._kwargs = kwargs
+
+    async def push_pipeline(
+        self, 
+        pipeline: 'AsyncPipelineT',
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Push a job via the pipeline
+        """
+        if not self.enabled or (job is None and job_id is None): return pipeline
+        return pipeline.rpush(self.queue_key, job_id or job.id).expire(self.queue_key, self.ttl)
+
+    async def _push_bg(
+        self, 
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Push a job via the background task
+        """
+        await self.ctx.async_client.rpush(self.queue_key, job_id or job.id)
+        await self.ctx.async_client.expire(self.queue_key, self.ttl)
+    
+    async def push_bg(
+        self, 
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        Push a job via the background task
+        """
+        if not self.enabled or (job is None and job_id is None): return
+        await create_background_task(self._push_bg, job = job, job_id = job_id, **kwargs)
+
+    async def push(
+        self, 
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        pipeline: typing.Optional['AsyncPipelineT'] = None,
+        **kwargs,
+    ):
+        """
+        Push a job to the queue
+        """
+        if pipeline is not None: return await self.push_pipeline(job = job, job_id = job_id, pipeline = pipeline, **kwargs)
+        return await self.push_bg(job = job, job_id = job_id, pipeline = pipeline, **kwargs)
+    
+    async def remove_pipeline(
+        self, 
+        pipeline: 'AsyncPipelineT',
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Remove a job via the pipeline
+        """
+        if not self.enabled or (job is None and job_id is None): return pipeline
+        return pipeline.lrem(self.queue_key, 1, job_id or job.id)
+    
+    async def _remove_bg(
+        self,
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Remove a job via the background task
+        """
+        await self.ctx.async_client.lrem(self.queue_key, 1, job_id or job.id)
+    
+    async def remove_bg(
+        self,
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None, 
+        **kwargs
+    ):
+        """
+        Remove a job via the background task
+        """
+        if not self.enabled or (job is None and job_id is None): return
+        await create_background_task(self._remove_bg, job = job, job_id = job_id, **kwargs)
+    
+    async def remove(
+        self,
+        job: typing.Optional[Job] = None,
+        job_id: typing.Optional[str] = None,
+        pipeline: typing.Optional['AsyncPipelineT'] = None,
+        **kwargs,
+    ):
+        """
+        Remove a job from the queue
+        """
+        if pipeline is not None: return await self.remove_pipeline(job = job, job_id = job_id, pipeline = pipeline, **kwargs)
+        return await self.remove_bg(job = job, job_id = job_id, **kwargs)
+    
+    @property
+    async def alength(self) -> int:
+        """
+        Returns the length of the queue
+        """
+        return await self.ctx.async_client.llen(self.queue_key) if self.enabled else 0
+
+    @property
+    async def ajob_ids(self) -> typing.List[str]:
+        """
+        Returns the job ids in the queue
+        """
+        return await self.ctx.async_client.lrange(self.queue_key, 0, -1) if self.enabled else []
+
+
 
 class TaskQueue:
     """
@@ -194,6 +326,10 @@ class TaskQueue:
         is_leader_process: typing.Optional[bool] = None,
         function_tracker_enabled: typing.Optional[bool] = None,
         function_tracker_ttl: typing.Optional[int] = None,
+        # New: push all jobs to a specific list in the queue
+        push_to_queue_enabled: typing.Optional[bool] = None,
+        push_to_queue_key: typing.Optional[str] = None,
+        push_to_queue_ttl: typing.Optional[int] = None,
         **kwargs
     ): # sourcery skip: low-code-quality
         self.settings = settings
@@ -236,9 +372,16 @@ class TaskQueue:
         self._worker_name: str = None
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.queue_pid: int = os.getpid()
+        self._push_queue_kwargs = {
+            'push_to_queue_enabled': push_to_queue_enabled,
+            'push_to_queue_key': push_to_queue_key,
+            'push_to_queue_ttl': push_to_queue_ttl,
+            **kwargs
+        }
         if silenced_functions:
             self.add_silenced_functions(*silenced_functions)
-    
+        
+
     @lazyproperty
     def _lock(self) -> asyncio.Lock:
         """
@@ -273,6 +416,13 @@ class TaskQueue:
             apool_class = AsyncConnectionPool,
             **self._ctx_kwargs
         )
+    
+    @lazyproperty
+    def push_queue(self) -> PushQueue:
+        """
+        Returns the PushQueue for the queue.
+        """
+        return PushQueue(self.ctx, **self._push_queue_kwargs)
 
     async def _get_stats(self, log_stats: bool = False, include_jobs: bool = True, include_conn_kwargs: bool = True, include_retries: bool = False):
         """
@@ -578,11 +728,14 @@ class TaskQueue:
                     swept.append(job_id)
                     # async with self.pipeline(transaction = True) as pipe:
                     async with self.ctx.async_client.pipeline(transaction = True) as pipe:
-                        await (
-                            pipe.lrem(active_key, 0, job_id)
-                            .zrem(incomplete_key, job_id)
-                            .execute()
-                        )
+                        pipe.lrem(active_key, 0, job_id).zrem(incomplete_key, job_id)
+                        pipe = await self.push_queue.remove(job_id = job_id, pipeline = pipe)
+                        await pipe.execute()
+                        # await (
+                        #     pipe.lrem(active_key, 0, job_id)
+                        #     .zrem(incomplete_key, job_id)
+                        #     .execute()
+                        # )
                         # await (
                         #     pipe.lrem(self.active_key, 0, job_id)
                         #     .zrem(self.incomplete_key, job_id)
@@ -638,11 +791,14 @@ class TaskQueue:
         active_key = self.active_key if worker_id is None else f"{self.active_key}:{worker_id}"
         incomplete_key = self.incomplete_key if worker_id is None else f"{self.incomplete_key}:{worker_id}"
         async with self.ctx.async_client.pipeline(transaction = True) as pipe:
-            await (
-                pipe.lrem(active_key, 0, job_id)
-                .zrem(incomplete_key, job_id)
-                .execute()
-            )
+            pipe = pipe.lrem(active_key, 0, job_id).zrem(incomplete_key, job_id)
+            pipe = await self.push_queue.remove(job_id = job_id, pipeline = pipe)
+            await pipe.execute()
+            # await (
+            #     pipe.lrem(active_key, 0, job_id)
+            #     .zrem(incomplete_key, job_id)
+            #     .execute()
+            # )
         return True
 
     async def listen(self, job_keys: typing.List[str], callback: typing.Callable, timeout: int = 10):
@@ -750,6 +906,7 @@ class TaskQueue:
             else:
                 await self.ctx.async_lrem(job.active_key, 0, job.id)
             
+            await self.push_queue.remove(job_id = job.id)
             await self.track_job(job)
 
 
@@ -776,6 +933,7 @@ class TaskQueue:
             else:
                 pipe = pipe.zadd(job.incomplete_key, {job_id: job.scheduled})
                 pipe = pipe.rpush(job.queued_key, job_id)
+            await self.push_queue.push(job_id = job_id)
             await pipe.set(job_id, self.serialize(job)).execute()
             self.retried += 1
             await self.notify(job)
@@ -811,7 +969,8 @@ class TaskQueue:
                 pipe = pipe.set(job_id, self.serialize(job))
             else:
                 pipe.delete(job_id)
-
+            
+            pipe = await self.push_queue.remove(job_id = job_id, pipeline = pipe)
             await pipe.execute()
 
             if status == JobStatus.COMPLETE:
