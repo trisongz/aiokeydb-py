@@ -946,7 +946,20 @@ class AsyncKDBDict(KDBDict):
         if key == 'count':
             return await self.kdb.async_exists(self.name_count_key)
         return await self.exists_all(*key) if isinstance(key, list) else await self.exists(key)
+
+    async def aincr(self, field: Union[str, int], amount: int = 1, key: Optional[str] = None) -> int:
+        """
+        Increments the given key
+        """
+        return await self.ahincr(field = field, amount = amount, key = key)
     
+    async def adecr(self, field: Union[str, int], amount: int = 1, key: Optional[str] = None) -> int:
+        """
+        Decrements the given key
+        """
+        return await self.ahdecr(field = field, amount = amount, key = key)
+    
+
     @property
     async def length(self) -> int:
         """

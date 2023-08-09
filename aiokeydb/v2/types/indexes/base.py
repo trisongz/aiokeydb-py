@@ -466,6 +466,20 @@ class BaseKDBIndex(ABC):
         func = self.kdb.async_hincrby if isinstance(amount, int) else self.kdb.async_hincrbyfloat
         return await func(self.get_key(key), field, amount = amount)
     
+    
+    def hdecr(self, key: str, field: str, amount: AmountT = 1) -> AmountT:
+        """
+        Decrements the given key
+        """
+        return self.hincr(key, field, amount = -amount)
+    
+    async def ahdecr(self, key: str, field: str, amount: AmountT = 1) -> AmountT:
+        """
+        Decrements the given key
+        """
+        return await self.ahincr(key, field, amount = -amount)
+    
+    
     def hkeys(self, key: str) -> List[str]:
         """
         Returns the keys for the given key
