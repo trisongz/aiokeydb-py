@@ -410,7 +410,10 @@ class Job(BaseModel):
         """
         if len(str(self.kwargs)) < 10000:
             return str(self.kwargs)
-        return str({k: (f'{v[:50]}...' if len(str(v)) > 50 else v) for k, v in self.kwargs.items()})[:10000]
+        try:
+            return str({k: (f'{v[:50]}...' if len(str(v)) > 50 else v) for k, v in self.kwargs.items()})[:10000]
+        except Exception:
+            return str(self.kwargs)[:10000]
         
 
     @property
