@@ -2115,7 +2115,10 @@ class TaskQueue:
         """
         queue_stats = {}
         for kind in self._queue_kind_key_map.keys():
-            queue_stats[kind] = await self.count(kind)
+            try:
+                queue_stats[kind] = await self.count(kind)
+            except Exception as e:
+                logger.error(f"Error while counting queue {kind}: {e}")
         return queue_stats
 
     @property
