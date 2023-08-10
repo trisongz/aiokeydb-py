@@ -1774,6 +1774,7 @@ class TaskQueue:
         raise_exceptions: typing.Optional[bool] = False,
         refresh_interval: typing.Optional[float] = 0.5,
         return_results: typing.Optional[bool] = True,
+        cancel_func: typing.Optional[typing.Callable] = None,
         **kwargs,
     ) -> typing.AsyncGenerator[typing.Any, None]:
         # sourcery skip: low-code-quality
@@ -1803,6 +1804,10 @@ class TaskQueue:
                     jobs.remove(job)
                 
                 if not jobs: break
+            if cancel_func and await cancel_func():
+                if verbose: logger.info(f'Cancelled {len(jobs)} jobs')
+                await asyncio.gather(*[self.abort(job, "cancelled") for job in jobs])
+                break
             await asyncio.sleep(refresh_interval)
         
         if verbose: 
@@ -1827,6 +1832,7 @@ class TaskQueue:
         _raise_exceptions: typing.Optional[bool] = False,
         _return_results: typing.Optional[bool] = True,
         _key_func: typing.Optional[typing.Callable] = None,
+        _cancel_func: typing.Optional[typing.Callable] = None,
         **kwargs,
     ) -> typing.AsyncGenerator[typing.Any, None]:
         """
@@ -1854,6 +1860,7 @@ class TaskQueue:
                 verbose = _verbose,
                 raise_exceptions = _raise_exceptions,
                 return_results = _return_results,
+                cancel_func = _cancel_func,
             ):
                 yield completed_job
                 n_items += 1
