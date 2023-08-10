@@ -10,7 +10,7 @@ class JobStatus(str, enum.Enum):
     FAILED = "failed"
     COMPLETE = "complete"
 
-
+INCOMPLETE_STATUSES = {JobStatus.NEW, JobStatus.DEFERRED, JobStatus.QUEUED, JobStatus.ACTIVE}
 TERMINAL_STATUSES = {JobStatus.COMPLETE, JobStatus.FAILED, JobStatus.ABORTED}
 UNSUCCESSFUL_TERMINAL_STATUSES = TERMINAL_STATUSES - {JobStatus.COMPLETE}
 

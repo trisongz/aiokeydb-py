@@ -32,6 +32,8 @@ from aiokeydb.v2.types.jobs import (
     FunctionTracker,
     TERMINAL_STATUSES,
     UNSUCCESSFUL_TERMINAL_STATUSES,
+    INCOMPLETE_STATUSES,
+
 )
 import aiokeydb.v2.exceptions as exceptions
 from aiokeydb.v2.exceptions import JobError
@@ -742,7 +744,8 @@ class TaskQueue:
                         #     .execute()
                         # )
                     self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
-                elif job.status != JobStatus.ACTIVE or job.stuck:
+                # elif job.status != JobStatus.ACTIVE or job.stuck:
+                elif job.status not in INCOMPLETE_STATUSES or job.stuck:
                     swept.append(job_id)
                     await job.finish(JobStatus.ABORTED, error="swept")
                     if self.is_silenced_function(job.function, stage = 'sweep'):
@@ -772,7 +775,8 @@ class TaskQueue:
         verbose = verbose if verbose is not None else self.verbose_results
         if not job:
             if verbose: self.logger(kind = "sweep").info(f"Sweeping missing job {job_id}")
-        elif job.status != JobStatus.ACTIVE or job.stuck:
+        # elif job.status != JobStatus.ACTIVE or job.stuck:
+        elif job.status not in INCOMPLETE_STATUSES or job.stuck:
             await job.finish(JobStatus.ABORTED, error="swept")
             if self.is_silenced_function(job.function, stage = 'sweep'):
                 pass

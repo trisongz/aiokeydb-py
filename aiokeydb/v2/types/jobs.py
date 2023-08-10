@@ -20,7 +20,7 @@ from aiokeydb.v2.utils.queue import (
 )
 from aiokeydb.v2.configs import settings
 from aiokeydb.v2.utils.logs import logger
-from aiokeydb.v2.types.static import JobStatus, TaskType, TERMINAL_STATUSES, UNSUCCESSFUL_TERMINAL_STATUSES
+from aiokeydb.v2.types.static import JobStatus, TaskType, TERMINAL_STATUSES, UNSUCCESSFUL_TERMINAL_STATUSES, INCOMPLETE_STATUSES
 
 
 if typing.TYPE_CHECKING:
