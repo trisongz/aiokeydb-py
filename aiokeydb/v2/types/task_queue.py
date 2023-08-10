@@ -1092,6 +1092,7 @@ class TaskQueue:
         worker_name: typing.Optional[str] = None,
         job_callback: typing.Optional[typing.Callable] = None,
         job_callback_kwargs: typing.Optional[typing.Dict] = None,
+        _return_existing_job: bool = False,
         **kwargs
     ) -> typing.Optional[Job]:
         """
@@ -1106,6 +1107,7 @@ class TaskQueue:
     async def enqueue(
         self, 
         job_or_func: typing.Union[Job, str, typing.Callable],
+        _return_existing_job: bool = False,
         **kwargs
     ) -> typing.Optional[Job]:
         """
@@ -1114,7 +1116,7 @@ class TaskQueue:
         Kwargs can be arguments of the function or properties of the job.
         If a job instance is passed in, it's properties are overriden.
 
-        If the job has already been enqueued, this returns None.
+        If the job has already been enqueued, this returns existing job.
         """
         job = Job.from_kwargs(job_or_func, **kwargs)
 
@@ -1146,7 +1148,8 @@ class TaskQueue:
                     args=[self.serialize(job), job.scheduled],
                     client = self.ctx.async_client,
             ):
-                return None
+                return await self.job(job.id) if _return_existing_job else None
+                # return None
         if not self.client_mode and self.debug_enabled:
             self.logger(job=job, kind="enqueue").info(f"Enqueuing {job}")
         elif self.is_silenced_function(job.function, stage = 'enqueue'):
