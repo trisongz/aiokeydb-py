@@ -8,6 +8,7 @@ import signal
 import typing
 import contextlib
 import functools
+# from collections import Counter
 from croniter import croniter
 # from lazyops.utils.logs import default_logger as logger
 
@@ -148,6 +149,7 @@ class Worker:
             else: name = function.__qualname__
             self.functions[name] = function
         self._worker_identity: str = f'[{self.worker_pid}] {self.settings.app_name or "KeyDBWorker"}'
+        self._tasks_idx: int = 0
     
     @property
     def _worker_name(self):
@@ -415,6 +417,7 @@ class Worker:
                 )
 
             if not job: return
+            
             if job.worker_id and job.worker_id != self.worker_id:
                 if self.debug_enabled or self.queue.verbose_results:
                     self.logger(job = job, kind = "process").info(f"⊘ Rejected job, queued_key={job.queued_key}, func={job.function}, id={job.id} | worker_id={job.worker_id} != {self.worker_id}")
@@ -426,7 +429,8 @@ class Worker:
                 
             if job.worker_name or job.worker_id and (self.debug_enabled or self.queue.verbose_results):
                 self.logger(job = job, kind = "process").info(f"☑ Accepted job, func={job.function}, id={job.id}, worker_name={job.worker_name}, worker_id={job.worker_id}")
-
+            
+            self._tasks_idx += 1
             job.started = now()
             job.status = JobStatus.ACTIVE
             job.attempts += 1
@@ -439,7 +443,7 @@ class Worker:
             if not self.is_silenced_function(job.function, stage = "process"):
                 _msg = f"← duration={job.duration('running')}ms, node={self.node_name}, func={job.function}"
                 if self.verbose_concurrency:
-                    _msg = _msg.replace("node=", f"conn=[{concurrency_id}/{self.concurrency}], node=")
+                    _msg = _msg.replace("node=", f"idx={self._tasks_idx}, conn=({concurrency_id}/{self.concurrency}), node=")
                 self.logger(job = job, kind = "process").info(_msg)
 
             function = ensure_coroutine_function(self.functions[job.function])
@@ -449,7 +453,8 @@ class Worker:
                 self.logger(job = job, kind = "process").error(
                     f"Failed to create task for [{job.function}] {function} with error: {e}.\nKwargs: {job.kwargs}"
                 )
-                get_and_log_exc()
+                get_and_log_exc(job = job)
+                self._tasks_idx -= 1
                 raise e
             self.job_task_contexts[job] = {"task": task, "aborted": False}
             result = await asyncio.wait_for(task, job.timeout)
@@ -465,6 +470,7 @@ class Worker:
                     await job.finish(JobStatus.FAILED, error=error)
                 else: await job.retry(error)
         finally:
+            self._tasks_idx -= 1
             if context:
                 self.job_task_contexts.pop(job, None)
                 try: await self._after_process(context)

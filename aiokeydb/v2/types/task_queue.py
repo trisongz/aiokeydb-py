@@ -889,7 +889,7 @@ class TaskQueue:
         Abort a job.
         """
         # async with self._op_sem:
-        async with self.op_sephamore(job.bypass_lock):
+        async with self.op_sephamore(job.bypass_lock if job else False):
             async with self.ctx.async_client.pipeline(transaction = True, retryable = True) as pipe:
             # async with self.pipeline(transaction = True) as pipe:
                 dequeued, *_ = await (
@@ -2107,6 +2107,16 @@ class TaskQueue:
             "scheduled": self.scheduled_key,
             "incomplete": self.incomplete_key,
         }
+
+    @property
+    async def queue_job_stats(self) -> typing.Dict[str, int]:
+        """
+        Returns the number of jobs in each queue
+        """
+        queue_stats = {}
+        for kind in self._queue_kind_key_map.keys():
+            queue_stats[kind] = await self.count(kind)
+        return queue_stats
 
     @property
     async def _all_queue_jobs(self) -> typing.Dict[str, JobStatus]:
