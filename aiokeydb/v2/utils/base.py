@@ -35,7 +35,7 @@ from redis.utils import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from _aiokeydb.client import KeyDB, AsyncKeyDB, Pipeline, AsyncPipeline
+    from aiokeydb.client import KeyDB, AsyncKeyDB, Pipeline, AsyncPipeline
 
 def from_url(url, asyncio: bool = False, _is_async: Optional[bool] = None, **kwargs) -> Union["KeyDB", "AsyncKeyDB"]:
     """
@@ -47,10 +47,10 @@ def from_url(url, asyncio: bool = False, _is_async: Optional[bool] = None, **kwa
     _is_async = asyncio if _is_async is None else _is_async
 
     if _is_async:
-        from _aiokeydb.client import AsyncKeyDB
+        from aiokeydb.client import AsyncKeyDB
         return AsyncKeyDB.from_url(url, **kwargs)
     
-    from _aiokeydb.client import KeyDB
+    from aiokeydb.client import KeyDB
     return KeyDB.from_url(url, **kwargs)
 
 
