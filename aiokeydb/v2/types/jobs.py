@@ -792,5 +792,26 @@ class Job(BaseModel):
         if self.worker_name:
             return f"{self.queue.incomplete_key}:{self.worker_name}"
         return self.queue.incomplete_key
+    
+    @property
+    def in_progress(self) -> bool:
+        """
+        Checks if the job is in progress.
+        """
+        return self.status in INCOMPLETE_STATUSES
+    
+    @property
+    def has_failed(self) -> bool:
+        """
+        Checks if the job has failed.
+        """
+        return self.status in UNSUCCESSFUL_TERMINAL_STATUSES
+    
+    @property
+    def is_complete(self) -> bool:
+        """
+        Checks if the job is complete.
+        """
+        return self.status == JobStatus.COMPLETE
 
 # Job.update_forward_refs()
