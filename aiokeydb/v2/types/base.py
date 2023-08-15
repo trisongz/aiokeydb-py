@@ -382,7 +382,7 @@ class KeyDBDsn(AnyUrl):
     @staticmethod
     def get_default_parts(parts: Parts) -> Parts:
         return {
-            'domain': 'localhost' if not (parts['ipv4'] or parts['ipv6']) else '',
+            'domain': '' if parts['ipv4'] or parts['ipv6'] else 'localhost',
             'port': '6379',
             'path': '/0',
         }

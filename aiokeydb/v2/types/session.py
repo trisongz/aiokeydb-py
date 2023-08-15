@@ -4076,7 +4076,7 @@ class KeyDBSession:
         return f'<{self.state._class__.__name__} {self.name}> {self.uri} @ {self.uri.db_id}'
     
     def __str__(self) -> str:
-        return self.uri
+        return str(self.uri)
     
     def __len__(self) -> int:
         return self.dbsize()
