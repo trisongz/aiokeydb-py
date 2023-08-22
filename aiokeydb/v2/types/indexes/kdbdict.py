@@ -894,6 +894,15 @@ class AsyncKDBDict(KDBDict):
         """
         return await self.get(field, default, key)
     
+
+    async def append(self, field: Union[str, int], value: Any, key: Optional[str] = None, ex: Optional[int] = None) -> int:
+        """
+        Appends the value to the list
+        """
+        if not await self.exists(field = field, key = key):
+            return await self.ahset(field, [value], key, ex = ex)
+        return await self.ahset(field = field, value = (await self.ahget(field = field, key = key) + [value]), key = key, ex = ex)
+
     async def exists(self, field: Union[str, int], key: Optional[str] = None) -> bool:
         """
         Returns the length of the given key
