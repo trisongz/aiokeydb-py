@@ -51,6 +51,15 @@ def validate_cron_schedule(cron_schedule: str) -> str:
             raise ValueError(f"Invalid time unit in cron expression: unit: {unit}, num: {num}")
         time_units[unit] = f'*/{num}'
     
+    if time_units['hours'] != "*" and time_units['minutes'] == '*':
+        time_units['minutes'] = 0
+    if time_units['days'] != "*" and time_units['hours'] == '*':
+        time_units['hours'] = 0
+    if time_units['weeks'] != "*" and time_units['days'] == '*':
+        time_units['days'] = 0
+    if time_units['months'] != "*" and time_units['weeks'] == '*':
+        time_units['weeks'] = 0
+    
     cron_expression = f"{time_units['minutes']} {time_units['hours']} {time_units['days']} {time_units['months']} {time_units['weeks']}"
     if time_units['seconds']:
         cron_expression += f" {time_units['seconds']}"

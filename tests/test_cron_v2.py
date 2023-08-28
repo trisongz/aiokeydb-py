@@ -44,4 +44,5 @@ for pattern in test_patterns:
         print(f"Pattern: {pattern}\nCron Expression: {cron_expression}\nValid: {is_valid}\nNext Time: {next_time} ({next_time - now:2f} s)\nNext Date: {next_date}")
     except ValueError as e:
         print(f"Pattern: {pattern}\nError: {str(e)}\n")
+    print()
 

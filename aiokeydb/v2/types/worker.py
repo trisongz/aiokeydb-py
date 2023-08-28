@@ -78,6 +78,7 @@ class Worker:
         is_leader_process: typing.Optional[bool] = None,
         verbose_startup: typing.Optional[bool] = None,
         verbose_concurrency: typing.Optional[bool] = True,
+        **kwargs
     ):  # sourcery skip: low-code-quality
         self.queue = queue
         self.settings = settings or default_settings
