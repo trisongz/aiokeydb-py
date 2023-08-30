@@ -47,6 +47,7 @@ _base_keys = [
     'idx',
     'log',
     '_keys',
+    '_idx',
 ]
 
 
