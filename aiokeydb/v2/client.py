@@ -15,9 +15,11 @@ from aiokeydb.v2.lock import Lock, AsyncLock
 from aiokeydb.v2.connection import (
     Encoder, 
     Connection,
+    SSLConnection,
     ConnectionPool, 
     BlockingConnectionPool, 
     AsyncConnection,
+    AsyncSSLConnection,
     AsyncConnectionPool,
     AsyncBlockingConnectionPool,
 )
@@ -121,13 +123,13 @@ class KeyDBClientMeta(type):
         max_connections: int = None,
         # pool_class: typing.Type[ConnectionPool] = BlockingConnectionPool,
         pool_class: typing.Type[ConnectionPool] = ConnectionPool,
-        connection_class: typing.Type[Connection] = Connection,
+        connection_class: typing.Type[Connection] = None,
         connection_kwargs: typing.Dict[str, typing.Any] = None,
 
         amax_connections: int = None,
         # apool_class: typing.Type[AsyncConnectionPool] = AsyncBlockingConnectionPool,
         apool_class: typing.Type[AsyncConnectionPool] = AsyncConnectionPool,
-        aconnection_class: typing.Type[AsyncConnection] = AsyncConnection,
+        aconnection_class: typing.Type[AsyncConnection] = None,
         aconnection_kwargs: typing.Dict[str, typing.Any] = None,
 
         auto_pubsub: typing.Optional[bool] = True,
@@ -154,6 +156,11 @@ class KeyDBClientMeta(type):
         # logger.log(msg = f"Configuring Pool for {name} w/ {uri.key} | decode = {decode_responses}", level = cls.settings.loglevel)
         if cls.is_leader_process and verbose: logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
         
+        if connection_class is None:
+            connection_class = SSLConnection if uri.ssl else Connection
+        if aconnection_class is None:
+            aconnection_class = AsyncSSLConnection if uri.ssl else AsyncConnection
+
         _pool = ClientPools(
             name = name,
             pool = pool_class.from_url(
