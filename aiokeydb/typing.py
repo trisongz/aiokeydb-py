@@ -3,13 +3,14 @@
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any, Awaitable, Iterable, TypeVar, Union
 
-from aiokeydb.compat import Protocol
-
+from redis.compat import Protocol
 if TYPE_CHECKING:
-    from aiokeydb.asyncio.connection import AsyncConnectionPool
-    from aiokeydb.asyncio.connection import Encoder as AsyncEncoder
-    from aiokeydb.connection import ConnectionPool, Encoder
-
+    from aiokeydb.connection import (
+        ConnectionPool,
+        Encoder,
+        AsyncConnectionPool, 
+        AsyncEncoder
+    )
 
 Number = Union[int, float]
 EncodedT = Union[bytes, memoryview]

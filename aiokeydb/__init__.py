@@ -1,17 +1,20 @@
 from __future__ import absolute_import
 
-import sys
-
-from aiokeydb.core import KeyDB, StrictKeyDB
-from aiokeydb.cluster import KeyDBCluster
+from aiokeydb.core import KeyDB, AsyncKeyDB
+from aiokeydb.cluster import KeyDBCluster, AsyncKeyDBCluster
 from aiokeydb.connection import (
     BlockingConnectionPool,
     Connection,
     ConnectionPool,
     SSLConnection,
     UnixDomainSocketConnection,
+    AsyncBlockingConnectionPool,
+    AsyncConnection,
+    AsyncConnectionPool,
+    AsyncSSLConnection,
+    AsyncUnixDomainSocketConnection,
 )
-from aiokeydb.credentials import CredentialProvider, UsernamePasswordCredentialProvider
+from redis.credentials import CredentialProvider, UsernamePasswordCredentialProvider
 from aiokeydb.exceptions import (
     AuthenticationError,
     AuthenticationWrongNumberOfArgsError,
@@ -22,48 +25,42 @@ from aiokeydb.exceptions import (
     InvalidResponse,
     PubSubError,
     ReadOnlyError,
-    KeyDBError,
     ResponseError,
     TimeoutError,
     WatchError,
+    JobError,
 )
 from aiokeydb.sentinel import (
     Sentinel,
     SentinelConnectionPool,
     SentinelManagedConnection,
-    SentinelManagedSSLConnection,
-)
-from aiokeydb.utils import from_url
-
-# Handle Async
-
-from aiokeydb.asyncio import (
-    AsyncKeyDB, 
-    StrictAsyncKeyDB,
-    AsyncBlockingConnectionPool,
-    AsyncConnection,
-    AsyncConnectionPool,
-    AsyncSSLConnection,
-    AsyncUnixDomainSocketConnection,
     AsyncSentinel,
     AsyncSentinelConnectionPool,
     AsyncSentinelManagedConnection,
-    AsyncSentinelManagedSSLConnection,
-    async_from_url
 )
 
+from aiokeydb.utils.base import from_url
+from aiokeydb.utils.lazy import get_keydb_settings
+
 # Handle Client
+from aiokeydb.serializers import SerializerType
+from aiokeydb.configs import KeyDBSettings, KeyDBWorkerSettings
+from aiokeydb.types.session import KeyDBSession
+from aiokeydb.client import KeyDBClient
 
-from aiokeydb.client.serializers import SerializerType
-from aiokeydb.client.config import KeyDBSettings
-from aiokeydb.client.schemas.session import KeyDBSession
-from aiokeydb.client.meta import KeyDBClient
+# Handle Queues
+from aiokeydb.types.jobs import Job, CronJob
+from aiokeydb.types.task_queue import TaskQueue
+from aiokeydb.types.worker import Worker
 
-if sys.version_info >= (3, 8):
-    from importlib import metadata
-else:
-    import importlib_metadata as metadata
+# Add KeyDB Index Types
+from aiokeydb.types.indexes import (
+    KDBIndex,
+    KDBDict,
+    AsyncKDBDict,
+)
 
+from aiokeydb.version import VERSION as __version__
 
 def int_or_str(value):
     try:
@@ -71,16 +68,10 @@ def int_or_str(value):
     except ValueError:
         return value
 
-from aiokeydb.version import VERSION as __version__
-
-
-# try:
-#     __version__ = metadata.version("aiokeydb")
-# except metadata.PackageNotFoundError:
-#     __version__ = "99.99.99"
-
 
 VERSION = tuple(map(int_or_str, __version__.split(".")))
+
+# Job.update_forward_refs()
 
 __all__ = [
     "AuthenticationError",
@@ -98,22 +89,24 @@ __all__ = [
     "ReadOnlyError",
     "KeyDB",
     "KeyDBCluster",
-    "KeyDBError",
+    # "KeyDBError",
     "ResponseError",
     "Sentinel",
     "SentinelConnectionPool",
     "SentinelManagedConnection",
     "SentinelManagedSSLConnection",
     "SSLConnection",
-    "StrictKeyDB",
+    # "StrictKeyDB",
     "TimeoutError",
     "UnixDomainSocketConnection",
     "WatchError",
+    "JobError",
     "CredentialProvider",
     "UsernamePasswordCredentialProvider",
     # Async
     "AsyncKeyDB", 
-    "StrictAsyncKeyDB",
+    "AsyncKeyDBCluster",
+    # "StrictAsyncKeyDB",
     "AsyncBlockingConnectionPool",
     "AsyncConnection",
     "AsyncConnectionPool",
@@ -122,12 +115,16 @@ __all__ = [
     "AsyncSentinel",
     "AsyncSentinelConnectionPool",
     "AsyncSentinelManagedConnection",
-    "AsyncSentinelManagedSSLConnection",
-    "async_from_url",
+    # "AsyncSentinelManagedSSLConnection",
 
     # Client
     "SerializerType",
     "KeyDBSettings",
+    "KeyDBWorkerSettings",
     "KeyDBSession",
     "KeyDBClient",
+
+    # Queues
+    "TaskQueue",
+    "Worker",
 ]

@@ -39,6 +39,6 @@ if _msgpack_avail:
 
 else:
     # Fallback to JSON
-    from aiokeydb.client.serializers._json import JsonSerializer
+    from aiokeydb.v2.serializers._json import JsonSerializer
 
     MsgPackSerializer = JsonSerializer

@@ -1,5 +1,15 @@
 # aiokeydb changelogs
 
+## 0.2.0rc0 (2023-10-16)
+
+**Breaking Changes Inbound**
+
+- Rework entire module, deprecating previous implementation into `v1`, maintaining legacy `v2` namespace, while transforming the previous `v2` into the primary module. The final release version of `0.2.0` will not contain any modules, but rather reference the `v2` namespace as the primary module.
+
+- Rework `pydantic` dependencies to support both `v1/v2`.
+
+
+
 ## 0.1.31 (2023-03-29)
   - Add new `add_fallback_function` method for Worker, which allows for a fallback function to be called when the worker fails to execute the task. (v2)
 

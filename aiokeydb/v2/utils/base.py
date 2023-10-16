@@ -23,7 +23,6 @@ try:
 except ImportError:
     CRYPTOGRAPHY_AVAILABLE = False
 
-from aiokeydb.client.types import ENOVAL
 from redis.utils import (
     str_if_bytes,
     safe_str,

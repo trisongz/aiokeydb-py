@@ -5,10 +5,12 @@ import threading
 import functools
 import hashlib
 
-from pydantic import validator, root_validator, Field
-from pydantic import BaseSettings as _BaseSettings
-from pydantic import BaseModel as _BaseModel
-from pydantic.networks import AnyUrl, Parts
+from aiokeydb.types.compat import validator, root_validator, Field
+from aiokeydb.types.compat import BaseSettings as _BaseSettings
+from aiokeydb.types.compat import BaseModel as _BaseModel
+from pydantic.networks import AnyUrl
+
+Parts = typing.Dict[str, typing.Union[str, int, None]]
 
 __all__ = [
     'BaseModel', 
