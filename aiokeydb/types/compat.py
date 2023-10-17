@@ -63,7 +63,7 @@ except ImportError:
 
 
 from pydantic import BaseModel, Field
-from pydantic.main import FieldInfo
+from pydantic.fields import FieldInfo
 
 def get_pyd_dict(model: typing.Union[BaseModel, BaseSettings], **kwargs) -> typing.Dict[str, typing.Any]:
     """
