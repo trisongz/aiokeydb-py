@@ -44,7 +44,7 @@ from aiokeydb.utils.lazy import get_keydb_settings
 
 # Handle Client
 from aiokeydb.serializers import SerializerType
-from aiokeydb.configs import KeyDBSettings, KeyDBWorkerSettings
+from aiokeydb.configs import KeyDBSettings, KeyDBWorkerSettings, settings
 from aiokeydb.types.session import KeyDBSession
 from aiokeydb.client import KeyDBClient
 

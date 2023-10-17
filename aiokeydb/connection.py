@@ -36,17 +36,12 @@ else:
     from async_timeout import timeout as async_timeout
 
 from aiokeydb.utils import set_ulimits
+from aiokeydb.types.base import _ALLOWED_SCHEMES
 
 logger = logging.getLogger(__name__)
 
 _SupportedSchemas = [
-    "keydb://",
-    "keydbs://",
-    "dfly://",
-    "dflys://",
-    "redis://",
-    "rediss://",
-    "unix://",
+    f'{scheme}://' for scheme in _ALLOWED_SCHEMES
 ]
 
 def parse_url(url: str, _is_async: bool = False):

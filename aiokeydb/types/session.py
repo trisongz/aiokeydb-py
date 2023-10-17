@@ -23,6 +23,8 @@ from aiokeydb.types import KeyDBUri, ENOVAL
 from aiokeydb.configs import KeyDBSettings
 from aiokeydb.utils import full_name, args_to_key, get_keydb_settings
 from aiokeydb.utils.helpers import create_retryable_client
+from aiokeydb.utils.logs import logger
+from .cachify import cachify, create_cachify, FT
 
 from aiokeydb.serializers import BaseSerializer
 
@@ -33,7 +35,6 @@ if sys.version_info >= (3, 11, 3):
 else:
     from async_timeout import timeout as async_timeout
 
-logger = logging.getLogger(__name__)
 
 
 class ClientPools(BaseModel):
@@ -92,8 +93,58 @@ class SessionCtx(BaseModel):
     pipeline: typing.Optional[Pipeline] = None
     async_pipeline: typing.Optional[AsyncPipeline] = None
 
+    dict_hash_key: typing.Optional[str] = None
+    dict_async_enabled: typing.Optional[bool] = None
+    dict_method: typing.Optional[str] = None
+
     class Config:
         arbitrary_types_allowed = True
+
+
+def _configure_dict_methods(
+    session: 'KeyDBSession',
+    method: typing.Optional[str] = None,
+    async_enabled: typing.Optional[bool] = None,
+):
+    """
+    Configures the Dict get/set methods
+    """
+    if method is None: method = session.state.dict_method
+    if async_enabled is None: async_enabled = session.state.dict_async_enabled
+    if method == session.state.dict_method and async_enabled == session.state.dict_async_enabled:
+        return
+    
+    if async_enabled:
+        async def getitem(self: 'KeyDBSession', key: KeyT) -> typing.Any:
+            if method == 'hash':
+                value = await self.async_client.hget(self.dict_hash_key, key)
+            else:
+                value = await self.async_client.get(key)
+            if value is None: 
+                key_value = f'{self.dict_hash_key}:{key}' if method == 'hash' else key
+                raise KeyError(key_value)
+            if self.dict_decoder is not False:
+                value = self.dict_decoder(value)
+            return value
+    else:
+        def getitem(self: 'KeyDBSession', key: KeyT) -> typing.Any:
+            if method == 'hash':
+                value = self.client.hget(self.dict_hash_key, key)
+            else:
+                value = self.client.get(key)
+            if value is None: 
+                key_value = f'{self.dict_hash_key}:{key}' if method == 'hash' else key
+                raise KeyError(key_value)
+            if self.dict_decoder is not False:
+                value = self.dict_decoder(value)
+            return value
+
+    setattr(KeyDBSession, '__getitem__', getitem)
+    session.__getitem__ = getitem
+    session.state.dict_method = method
+    session.state.dict_async_enabled = async_enabled
+    # logger.info(f'Configured Dict Get Method: {method} | Async Enabled: {async_enabled}, {iscoroutinefunction(getitem)}')
+
 
 
 class KeyDBSession:
@@ -138,8 +189,31 @@ class KeyDBSession:
         self.state = SessionCtx(
             cache_max_attempts = config.get('cache_max_attempts', 20)
         )
+
+        # Enhanced Dict
+        self.dict_hash_key: typing.Optional[str] = config.get('dict_hash_key', f'data:{self.name}:dict')
+        self.dict_encoder: typing.Callable = config.get('dict_encoder', self.serializer.dumps)
+        self.dict_decoder: typing.Callable = config.get('dict_decoder', self.serializer.loads)
+        self.state.dict_async_enabled = config.get('dict_async_enabled', False)
+        self.state.dict_method = config.get('dict_method', 'default')
+        self.configure_dict_methods()
         
         # logger.info(f'Encoder: {self.encoder} | Serializer: {self.serializer}')
+    
+    def configure_dict_methods(
+        self, 
+        method: typing.Optional[str] = None,
+        async_enabled: typing.Optional[bool] = None,
+    ):
+        """
+        Configures the Dict get/set methods
+        """
+        _configure_dict_methods(
+            self,
+            method = method,
+            async_enabled = async_enabled,
+        )
+
 
     @classmethod
     def _get_client_class(
@@ -3925,6 +3999,186 @@ class KeyDBSession:
     """
     Cachify
     """
+    def cachify_v2(
+        self,
+        ttl: typing.Optional[int] = None,
+        keybuilder: typing.Optional[typing.Callable] = None,
+        name: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        typed: typing.Optional[bool] = True,
+        
+        exclude_keys: typing.Optional[typing.List[str]] = None,
+        exclude_null: typing.Optional[bool] = True,
+        exclude_exceptions: typing.Optional[typing.Union[bool, typing.List[Exception]]] = True,
+        exclude_null_values_in_hash: typing.Optional[bool] = None,
+        exclude_default_values_in_hash: typing.Optional[bool] = None,
+
+        disabled: typing.Optional[typing.Union[bool, typing.Callable]] = None,
+        invalidate_after: typing.Optional[typing.Union[int, typing.Callable]] = None,
+        invalidate_if: typing.Optional[typing.Callable] = None,
+        overwrite_if: typing.Optional[typing.Callable] = None,
+        bypass_if: typing.Optional[typing.Callable] = None,
+
+        timeout: typing.Optional[float] = 1.0,
+        verbose: typing.Optional[bool] = False,
+        super_verbose: typing.Optional[bool] = False,
+        raise_exceptions: typing.Optional[bool] = True,
+
+        encoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        decoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+
+        hit_setter: typing.Optional[typing.Callable] = None,
+        hit_getter: typing.Optional[typing.Callable] = None,
+        **kwargs,
+    ) -> typing.Callable[[FT], FT]:
+        """
+        Enhanced Cachify
+
+        Args:
+            ttl (Optional[int], optional): The TTL for the cache. Defaults to None.
+            keybuilder (Optional[Callable], optional): The keybuilder for the cache. Defaults to None.
+            name (Optional[Union[str, Callable]], optional): The name for the cache. Defaults to None.
+            typed (Optional[bool], optional): Whether or not to include types in the cache key. Defaults to True.
+            exclude_keys (Optional[List[str]], optional): The keys to exclude from the cache key. Defaults to None.
+            exclude_null (Optional[bool], optional): Whether or not to exclude null values from the cache. Defaults to True.
+            exclude_exceptions (Optional[Union[bool, List[Exception]]], optional): Whether or not to exclude exceptions from the cache. Defaults to True.
+            exclude_null_values_in_hash (Optional[bool], optional): Whether or not to exclude null values from the cache hash. Defaults to None.
+            exclude_default_values_in_hash (Optional[bool], optional): Whether or not to exclude default values from the cache hash. Defaults to None.
+            disabled (Optional[Union[bool, Callable]], optional): Whether or not the cache is disabled. Defaults to None.
+            invalidate_after (Optional[Union[int, Callable]], optional): The number of hits after which the cache should be invalidated. Defaults to None.
+            invalidate_if (Optional[Callable], optional): The function to determine whether or not the cache should be invalidated. Defaults to None.
+            overwrite_if (Optional[Callable], optional): The function to determine whether or not the cache should be overwritten. Defaults to None.
+            bypass_if (Optional[Callable], optional): The function to determine whether or not the cache should be bypassed. Defaults to None.
+            timeout (Optional[float], optional): The timeout for the cache. Defaults to 1.0.
+            verbose (Optional[bool], optional): Whether or not to log verbose messages. Defaults to False.
+            super_verbose (Optional[bool], optional): Whether or not to log super verbose messages. Defaults to False.
+            raise_exceptions (Optional[bool], optional): Whether or not to raise exceptions. Defaults to True.
+            encoder (Optional[Union[str, Callable]], optional): The encoder for the cache. Defaults to None.
+            decoder (Optional[Union[str, Callable]], optional): The decoder for the cache. Defaults to None.
+            hit_setter (Optional[Callable], optional): The hit setter for the cache. Defaults to None.
+            hit_getter (Optional[Callable], optional): The hit getter for the cache. Defaults to None.
+            
+        """
+        # Migrate the old TTL param to the new cache_ttl param
+        if _ttl := kwargs.pop('cache_ttl', None):
+            ttl = _ttl
+        
+        return cachify(
+            ttl = ttl,
+            keybuilder = keybuilder,
+            name = name,
+            typed = typed,
+            exclude_keys = exclude_keys,
+            exclude_null = exclude_null,
+            exclude_exceptions = exclude_exceptions,
+            exclude_null_values_in_hash = exclude_null_values_in_hash,
+            exclude_default_values_in_hash = exclude_default_values_in_hash,
+            disabled = disabled,
+            invalidate_after = invalidate_after,
+            invalidate_if = invalidate_if,
+            overwrite_if = overwrite_if,
+            bypass_if= bypass_if,
+            timeout = timeout,
+            verbose = verbose,
+            super_verbose = super_verbose,
+            raise_exceptions = raise_exceptions,
+            encoder = encoder,
+            decoder = decoder,
+            hit_setter = hit_setter,
+            hit_getter = hit_getter,
+            session = self,
+            **kwargs,
+        )
+    
+    def create_cachify(
+        self,
+        ttl: typing.Optional[int] = None,
+        keybuilder: typing.Optional[typing.Callable] = None,
+        name: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        typed: typing.Optional[bool] = True,
+        
+        exclude_keys: typing.Optional[typing.List[str]] = None,
+        exclude_null: typing.Optional[bool] = True,
+        exclude_exceptions: typing.Optional[typing.Union[bool, typing.List[Exception]]] = True,
+        exclude_null_values_in_hash: typing.Optional[bool] = None,
+        exclude_default_values_in_hash: typing.Optional[bool] = None,
+
+        disabled: typing.Optional[typing.Union[bool, typing.Callable]] = None,
+        invalidate_after: typing.Optional[typing.Union[int, typing.Callable]] = None,
+        invalidate_if: typing.Optional[typing.Callable] = None,
+        overwrite_if: typing.Optional[typing.Callable] = None,
+        bypass_if: typing.Optional[typing.Callable] = None,
+
+        timeout: typing.Optional[float] = 1.0,
+        verbose: typing.Optional[bool] = False,
+        super_verbose: typing.Optional[bool] = False,
+        raise_exceptions: typing.Optional[bool] = True,
+
+        encoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        decoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+
+        hit_setter: typing.Optional[typing.Callable] = None,
+        hit_getter: typing.Optional[typing.Callable] = None,
+        **kwargs,
+    ) -> typing.Callable[[FT], FT]:
+        """
+        Creates a new `cachify` partial decorator with the given kwargs
+
+        Args:
+            ttl (typing.Optional[int], typing.Optional): The TTL for the cache. Defaults to None.
+            keybuilder (typing.Optional[typing.Callable], typing.Optional): The keybuilder for the cache. Defaults to None.
+            name (typing.Optional[Union[str, typing.Callable]], typing.Optional): The name for the cache. Defaults to None.
+            typed (typing.Optional[bool], typing.Optional): Whether or not to include types in the cache key. Defaults to True.
+            exclude_keys (typing.Optional[List[str]], typing.Optional): The keys to exclude from the cache key. Defaults to None.
+            exclude_null (typing.Optional[bool], typing.Optional): Whether or not to exclude null values from the cache. Defaults to True.
+            exclude_exceptions (typing.Optional[Union[bool, List[Exception]]], typing.Optional): Whether or not to exclude exceptions from the cache. Defaults to True.
+            exclude_null_values_in_hash (typing.Optional[bool], typing.Optional): Whether or not to exclude null values from the cache hash. Defaults to None.
+            exclude_default_values_in_hash (typing.Optional[bool], typing.Optional): Whether or not to exclude default values from the cache hash. Defaults to None.
+            disabled (typing.Optional[Union[bool, typing.Callable]], typing.Optional): Whether or not the cache is disabled. Defaults to None.
+            invalidate_after (typing.Optional[Union[int, typing.Callable]], typing.Optional): The number of hits after which the cache should be invalidated. Defaults to None.
+            invalidate_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be invalidated. Defaults to None.
+            overwrite_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be overwritten. Defaults to None.
+            bypass_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be bypassed. Defaults to None.
+            timeout (typing.Optional[float], typing.Optional): The timeout for the cache. Defaults to 1.0.
+            verbose (typing.Optional[bool], typing.Optional): Whether or not to log verbose messages. Defaults to False.
+            super_verbose (typing.Optional[bool], typing.Optional): Whether or not to log super verbose messages. Defaults to False.
+            raise_exceptions (typing.Optional[bool], typing.Optional): Whether or not to raise exceptions. Defaults to True.
+            encoder (typing.Optional[Union[str, typing.Callable]], typing.Optional): The encoder for the cache. Defaults to None.
+            decoder (typing.Optional[Union[str, typing.Callable]], typing.Optional): The decoder for the cache. Defaults to None.
+            hit_setter (typing.Optional[typing.Callable], typing.Optional): The hit setter for the cache. Defaults to None.
+            hit_getter (typing.Optional[typing.Callable], typing.Optional): The hit getter for the cache. Defaults to None.
+            
+        """
+        if _ttl := kwargs.pop('cache_ttl', None):
+            ttl = _ttl
+        
+        return create_cachify(
+            ttl = ttl,
+            keybuilder = keybuilder,
+            name = name,
+            typed = typed,
+            exclude_keys = exclude_keys,
+            exclude_null = exclude_null,
+            exclude_exceptions = exclude_exceptions,
+            exclude_null_values_in_hash = exclude_null_values_in_hash,
+            exclude_default_values_in_hash = exclude_default_values_in_hash,
+            disabled = disabled,
+            invalidate_after = invalidate_after,
+            invalidate_if = invalidate_if,
+            overwrite_if = overwrite_if,
+            bypass_if= bypass_if,
+            timeout = timeout,
+            verbose = verbose,
+            super_verbose = super_verbose,
+            raise_exceptions = raise_exceptions,
+            encoder = encoder,
+            decoder = decoder,
+            hit_setter = hit_setter,
+            hit_getter = hit_getter,
+            session = self,
+            **kwargs,
+        )
+
+
 
     def cachify(
         self,
@@ -4061,17 +4315,46 @@ class KeyDBSession:
     async def __acall__(self, method: str, *args, **kwargs) -> typing.Any:
         return await getattr(self.async_client, method)(*args, **kwargs)
 
-    def __getitem__(self, key: KeyT, default: typing.Any = None) -> typing.Any:
-        return self.get(key, default)
-    
     def __setitem__(self, key: KeyT, value: typing.Any) -> None:
-        self.set(key, value)
+        """
+        Set the value at key ``name`` to ``value``
+        """
+        if self.dict_encoder is not False:
+            value = self.dict_encoder(value)
+        if self.state.dict_method == 'hash':
+            self.client.hset(self.dict_hash_key, key, value)
+        else:
+            self.client.set(key, value)
+
+    def __contains__(self, key: KeyT) -> bool:
+        """
+        Return a boolean indicating whether key ``name`` exists
+        """
+        if self.state.dict_method == 'hash':
+            return self.client.hexists(self.dict_hash_key, key)
+        else:
+            return self.client.exists(key)
+
+    def __getitem__(self, key: KeyT) -> typing.Any:
+        if self.state.dict_method == 'hash':
+            value = self.client.hget(self.dict_hash_key, key)
+        else:
+            value = self.client.get(key)
+        if value is None: 
+            key_value = f'{self.dict_hash_key}:{key}' if self.state.dict_method == 'hash' else key
+            raise KeyError(key_value)
+        if self.dict_decoder is not False:
+            value = self.dict_decoder(value)
+        return value
     
     def __delitem__(self, key: KeyT) -> None:
-        self.delete(key)
-    
-    def __contains__(self, key: KeyT) -> bool:
-        return self.exists(key)
+        """
+        Delete one or more keys specified by ``names``
+        """
+        if self.state.dict_method  == 'hash':
+            self.client.hdel(self.dict_hash_key, key)
+        else:
+            self.client.delete(key)
     
     def __repr__(self) -> str:
         return f'<{self.state._class__.__name__} {self.name}> {self.uri} @ {self.uri.db_id}'

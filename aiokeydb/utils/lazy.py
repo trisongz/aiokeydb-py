@@ -13,6 +13,7 @@ def get_keydb_settings(**kwargs) -> KeyDBSettings:
     """
     global _keydb_settings
     if _keydb_settings is None:
+        from aiokeydb.configs.core import KeyDBSettings
         _keydb_settings = KeyDBSettings(**kwargs)
     return _keydb_settings
 

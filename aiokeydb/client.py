@@ -39,9 +39,8 @@ from aiokeydb.types import KeyDBUri
 from aiokeydb.types.session import KeyDBSession, ClientPools
 from aiokeydb.serializers import SerializerType, BaseSerializer
 from aiokeydb.utils.lazy import get_keydb_settings
+from aiokeydb.utils.logs import logger
 
-
-logger = logging.getLogger(__name__)
 
 class KeyDBClientMeta(type):
 
@@ -129,7 +128,9 @@ class KeyDBClientMeta(type):
         """
         cls._ctx = session
         cls.current = name or session.name
-        if cls.is_leader_process and verbose: logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: 
+            logger.log(cls.settings.loglevel, f'Setting to Current Session: {cls.current}')
+            # logger.log(msg = f'Setting to Current Session: {cls.current}', level = cls.settings.loglevel)
     
 
     def _configure_pool(
@@ -171,7 +172,9 @@ class KeyDBClientMeta(type):
             not bool(serializer or cls.serializer)
 
         # logger.log(msg = f"Configuring Pool for {name} w/ {uri.key} | decode = {decode_responses}", level = cls.settings.loglevel)
-        if cls.is_leader_process and verbose: logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: 
+            logger.log(cls.settings.loglevel, f"Configuring Pool for {name} w/ {uri.key}")
+            # logger.log(msg = f"Configuring Pool for {name} w/ {uri.key}", level = cls.settings.loglevel)
         
         if connection_class is None:
             connection_class = SSLConnection if uri.ssl else Connection
@@ -316,7 +319,9 @@ class KeyDBClientMeta(type):
         )
 
         cls.sessions[name] = session
-        if cls.is_leader_process and verbose: logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: 
+            logger.log(cls.settings.loglevel, f'Initialized Session: {name} ({session.uri})')
+            # logger.log(msg = f'Initialized Session: {name} ({session.uri})', level = cls.settings.loglevel)
         if (set_current or overwrite) or cls._ctx is None:
             cls._set_ctx(session, name, verbose = verbose)
         return session
@@ -341,7 +346,9 @@ class KeyDBClientMeta(type):
             if verbose: logger.warning(f'Session {session.name} already exists')
             return
         cls.sessions[session.name] = session
-        if cls.is_leader_process and verbose: logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: 
+            logger.log(cls.settings.loglevel, f'Added Session: {session.name} ({session.uri})')
+            # logger.log(msg = f'Added Session: {session.name} ({session.uri})', level = cls.settings.loglevel)
         if set_current: cls._set_ctx(session, verbose = verbose)
     
     def create_session(
@@ -378,7 +385,9 @@ class KeyDBClientMeta(type):
             **kwargs,
         )
         cls.sessions[name] = session
-        if cls.is_leader_process and verbose: logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
+        if cls.is_leader_process and verbose: 
+            logger.log(cls.settings.loglevel, f'Created Session: {name} ({session.uri}) @ DB {db_id}')
+            # logger.log(msg = f'Created Session: {name} ({session.uri}) @ DB {db_id}', level = cls.settings.loglevel)
         if set_current: cls._set_ctx(session, name, verbose = verbose)
         return session
     
@@ -4630,7 +4639,9 @@ class KeyDBClientMeta(type):
     
     async def aclose(cls, verbose: bool = True):
         for name, ctx in cls.sessions.items():
-            if verbose: logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
+            if verbose: 
+                logger.log(cls.settings.loglevel, f'Closing Session: {name}')
+                # logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
             await ctx.aclose()
         
         cls._sessions = {}
@@ -4655,7 +4666,9 @@ class KeyDBClientMeta(type):
         sess = cls.sessions[name]
         await sess.aclose()
         del cls.sessions[name]
-        if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
+        if verbose: 
+            logger.log(cls.settings.loglevel, f'Closed Session: {name}')
+            # logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
     
 
     async def aclose_sessions(
@@ -4678,7 +4691,8 @@ class KeyDBClientMeta(type):
     
     def close(cls):
         for name, ctx in cls.sessions.items():
-            logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
+            logger.log(cls.settings.loglevel, f'Closing Session: {name}')
+            # logger.log(msg = f'Closing Session: {name}', level = cls.settings.loglevel)
             ctx.close()
         
         cls.sessions = {}
@@ -4702,7 +4716,9 @@ class KeyDBClientMeta(type):
         sess = cls.sessions[name]
         sess.close()
         del cls.sessions[name]
-        if verbose: logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
+        if verbose: 
+            logger.log(cls.settings.loglevel, f'Closed Session: {name}')
+            # logger.log(msg = f'Closed Session: {name}', level = cls.settings.loglevel)
     
     def close_sessions(
         cls,
@@ -5151,6 +5167,179 @@ class KeyDBClientMeta(type):
             **kwargs
         )
     
+    def cachify_v2(
+        cls,
+        ttl: typing.Optional[int] = None,
+        keybuilder: typing.Optional[typing.Callable] = None,
+        name: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        typed: typing.Optional[bool] = True,
+        
+        exclude_keys: typing.Optional[typing.List[str]] = None,
+        exclude_null: typing.Optional[bool] = True,
+        exclude_exceptions: typing.Optional[typing.Union[bool, typing.List[Exception]]] = True,
+        exclude_null_values_in_hash: typing.Optional[bool] = None,
+        exclude_default_values_in_hash: typing.Optional[bool] = None,
+
+        disabled: typing.Optional[typing.Union[bool, typing.Callable]] = None,
+        invalidate_after: typing.Optional[typing.Union[int, typing.Callable]] = None,
+        invalidate_if: typing.Optional[typing.Callable] = None,
+        overwrite_if: typing.Optional[typing.Callable] = None,
+        bypass_if: typing.Optional[typing.Callable] = None,
+
+        timeout: typing.Optional[float] = 1.0,
+        verbose: typing.Optional[bool] = False,
+        super_verbose: typing.Optional[bool] = False,
+        raise_exceptions: typing.Optional[bool] = True,
+
+        encoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        decoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+
+        hit_setter: typing.Optional[typing.Callable] = None,
+        hit_getter: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Enhanced Cachify
+
+        Args:
+            ttl (Optional[int], optional): The TTL for the cache. Defaults to None.
+            keybuilder (Optional[Callable], optional): The keybuilder for the cache. Defaults to None.
+            name (Optional[Union[str, Callable]], optional): The name for the cache. Defaults to None.
+            typed (Optional[bool], optional): Whether or not to include types in the cache key. Defaults to True.
+            exclude_keys (Optional[List[str]], optional): The keys to exclude from the cache key. Defaults to None.
+            exclude_null (Optional[bool], optional): Whether or not to exclude null values from the cache. Defaults to True.
+            exclude_exceptions (Optional[Union[bool, List[Exception]]], optional): Whether or not to exclude exceptions from the cache. Defaults to True.
+            exclude_null_values_in_hash (Optional[bool], optional): Whether or not to exclude null values from the cache hash. Defaults to None.
+            exclude_default_values_in_hash (Optional[bool], optional): Whether or not to exclude default values from the cache hash. Defaults to None.
+            disabled (Optional[Union[bool, Callable]], optional): Whether or not the cache is disabled. Defaults to None.
+            invalidate_after (Optional[Union[int, Callable]], optional): The number of hits after which the cache should be invalidated. Defaults to None.
+            invalidate_if (Optional[Callable], optional): The function to determine whether or not the cache should be invalidated. Defaults to None.
+            overwrite_if (Optional[Callable], optional): The function to determine whether or not the cache should be overwritten. Defaults to None.
+            bypass_if (Optional[Callable], optional): The function to determine whether or not the cache should be bypassed. Defaults to None.
+            timeout (Optional[float], optional): The timeout for the cache. Defaults to 1.0.
+            verbose (Optional[bool], optional): Whether or not to log verbose messages. Defaults to False.
+            super_verbose (Optional[bool], optional): Whether or not to log super verbose messages. Defaults to False.
+            raise_exceptions (Optional[bool], optional): Whether or not to raise exceptions. Defaults to True.
+            encoder (Optional[Union[str, Callable]], optional): The encoder for the cache. Defaults to None.
+            decoder (Optional[Union[str, Callable]], optional): The decoder for the cache. Defaults to None.
+            hit_setter (Optional[Callable], optional): The hit setter for the cache. Defaults to None.
+            hit_getter (Optional[Callable], optional): The hit getter for the cache. Defaults to None.
+            
+        """
+        session = cls.get_session(_session)
+        return session.cachify_v2(
+            ttl = ttl,
+            keybuilder = keybuilder,
+            name = name,
+            typed = typed,
+            exclude_keys = exclude_keys,
+            exclude_null = exclude_null,
+            exclude_exceptions = exclude_exceptions,
+            exclude_null_values_in_hash = exclude_null_values_in_hash,
+            exclude_default_values_in_hash = exclude_default_values_in_hash,
+            disabled = disabled,
+            invalidate_after = invalidate_after,
+            invalidate_if = invalidate_if,
+            overwrite_if = overwrite_if,
+            bypass_if= bypass_if,
+            timeout = timeout,
+            verbose = verbose,
+            super_verbose = super_verbose,
+            raise_exceptions = raise_exceptions,
+            encoder = encoder,
+            decoder = decoder,
+            hit_setter = hit_setter,
+            hit_getter = hit_getter,
+            **kwargs,
+        )
+        
+    def create_cachify(
+        cls,
+        ttl: typing.Optional[int] = None,
+        keybuilder: typing.Optional[typing.Callable] = None,
+        name: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        typed: typing.Optional[bool] = True,
+        
+        exclude_keys: typing.Optional[typing.List[str]] = None,
+        exclude_null: typing.Optional[bool] = True,
+        exclude_exceptions: typing.Optional[typing.Union[bool, typing.List[Exception]]] = True,
+        exclude_null_values_in_hash: typing.Optional[bool] = None,
+        exclude_default_values_in_hash: typing.Optional[bool] = None,
+
+        disabled: typing.Optional[typing.Union[bool, typing.Callable]] = None,
+        invalidate_after: typing.Optional[typing.Union[int, typing.Callable]] = None,
+        invalidate_if: typing.Optional[typing.Callable] = None,
+        overwrite_if: typing.Optional[typing.Callable] = None,
+        bypass_if: typing.Optional[typing.Callable] = None,
+
+        timeout: typing.Optional[float] = 1.0,
+        verbose: typing.Optional[bool] = False,
+        super_verbose: typing.Optional[bool] = False,
+        raise_exceptions: typing.Optional[bool] = True,
+
+        encoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+        decoder: typing.Optional[typing.Union[str, typing.Callable]] = None,
+
+        hit_setter: typing.Optional[typing.Callable] = None,
+        hit_getter: typing.Optional[typing.Callable] = None,
+        _session: typing.Optional[str] = None,
+        **kwargs,
+    ):
+        """
+        Creates a new `cachify` partial decorator with the given kwargs
+
+        Args:
+            ttl (typing.Optional[int], typing.Optional): The TTL for the cache. Defaults to None.
+            keybuilder (typing.Optional[typing.Callable], typing.Optional): The keybuilder for the cache. Defaults to None.
+            name (typing.Optional[Union[str, typing.Callable]], typing.Optional): The name for the cache. Defaults to None.
+            typed (typing.Optional[bool], typing.Optional): Whether or not to include types in the cache key. Defaults to True.
+            exclude_keys (typing.Optional[List[str]], typing.Optional): The keys to exclude from the cache key. Defaults to None.
+            exclude_null (typing.Optional[bool], typing.Optional): Whether or not to exclude null values from the cache. Defaults to True.
+            exclude_exceptions (typing.Optional[Union[bool, List[Exception]]], typing.Optional): Whether or not to exclude exceptions from the cache. Defaults to True.
+            exclude_null_values_in_hash (typing.Optional[bool], typing.Optional): Whether or not to exclude null values from the cache hash. Defaults to None.
+            exclude_default_values_in_hash (typing.Optional[bool], typing.Optional): Whether or not to exclude default values from the cache hash. Defaults to None.
+            disabled (typing.Optional[Union[bool, typing.Callable]], typing.Optional): Whether or not the cache is disabled. Defaults to None.
+            invalidate_after (typing.Optional[Union[int, typing.Callable]], typing.Optional): The number of hits after which the cache should be invalidated. Defaults to None.
+            invalidate_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be invalidated. Defaults to None.
+            overwrite_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be overwritten. Defaults to None.
+            bypass_if (typing.Optional[typing.Callable], typing.Optional): The function to determine whether or not the cache should be bypassed. Defaults to None.
+            timeout (typing.Optional[float], typing.Optional): The timeout for the cache. Defaults to 1.0.
+            verbose (typing.Optional[bool], typing.Optional): Whether or not to log verbose messages. Defaults to False.
+            super_verbose (typing.Optional[bool], typing.Optional): Whether or not to log super verbose messages. Defaults to False.
+            raise_exceptions (typing.Optional[bool], typing.Optional): Whether or not to raise exceptions. Defaults to True.
+            encoder (typing.Optional[Union[str, typing.Callable]], typing.Optional): The encoder for the cache. Defaults to None.
+            decoder (typing.Optional[Union[str, typing.Callable]], typing.Optional): The decoder for the cache. Defaults to None.
+            hit_setter (typing.Optional[typing.Callable], typing.Optional): The hit setter for the cache. Defaults to None.
+            hit_getter (typing.Optional[typing.Callable], typing.Optional): The hit getter for the cache. Defaults to None.
+            
+        """
+        session = cls.get_session(_session)
+        return session.create_cachify(
+            ttl = ttl,
+            keybuilder = keybuilder,
+            name = name,
+            typed = typed,
+            exclude_keys = exclude_keys,
+            exclude_null = exclude_null,
+            exclude_exceptions = exclude_exceptions,
+            exclude_null_values_in_hash = exclude_null_values_in_hash,
+            exclude_default_values_in_hash = exclude_default_values_in_hash,
+            disabled = disabled,
+            invalidate_after = invalidate_after,
+            invalidate_if = invalidate_if,
+            overwrite_if = overwrite_if,
+            bypass_if= bypass_if,
+            timeout = timeout,
+            verbose = verbose,
+            super_verbose = super_verbose,
+            raise_exceptions = raise_exceptions,
+            encoder = encoder,
+            decoder = decoder,
+            hit_setter = hit_setter,
+            hit_getter = hit_getter,
+            **kwargs,
+        )
 
             
 

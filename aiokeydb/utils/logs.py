@@ -1,4 +1,4 @@
-from lazyops.utils.logs import get_logger, STATUS_COLOR, COLORED_MESSAGE_MAP, FALLBACK_STATUS_COLOR
+from lazyops.utils.logs import Logger, get_logger, STATUS_COLOR, COLORED_MESSAGE_MAP, FALLBACK_STATUS_COLOR
 
 
 class ColorMap:
@@ -58,6 +58,6 @@ class CustomizeLogger:
                    + extra + "<level>" + msg + f"</level>{STATUS_COLOR['reset']}\n"
 
 
-logger = get_logger(
+logger: Logger = get_logger(
     format = CustomizeLogger.logger_formatter,
 )

@@ -5,10 +5,11 @@ import threading
 import functools
 import hashlib
 
-from .compat import validator, root_validator, Field
+from .compat import validator, root_validator, Field, PYD_VERSION
 from .compat import BaseSettings as _BaseSettings
 from .compat import BaseModel as _BaseModel
-from pydantic.networks import AnyUrl
+from pydantic.networks import AnyUrl, Url, MultiHostUrl
+
 
 Parts = typing.Dict[str, typing.Union[str, int, None]]
 
@@ -375,75 +376,111 @@ class BaseModel(_BaseModel):
             if not hasattr(self, k): continue
             setattr(self, k, v)
 
+_ALLOWED_SCHEMES = [
+    'redis',
+    'rediss',
+    'keydb',
+    'keydbs',
+    'dfly',
+    'dflys',
+    'unix',
+]
 
-class KeyDBDsn(AnyUrl):
-    __slots__ = ()
-    allowed_schemes = {'redis', 'rediss', 'keydb', 'keydbs'}
-    host_required = False
+if PYD_VERSION == 2:
+    from pydantic.networks import UrlConstraints
+    KeyDBDsn = typing.Annotated[
+        Url, 
+        UrlConstraints(
+            allowed_schemes = _ALLOWED_SCHEMES,
+            default_host='localhost',
+            default_port = 6379,
+            default_path='/0',
+        )
+    ]
 
-    @staticmethod
-    def get_default_parts(parts: Parts) -> Parts:
-        return {
-            'domain': '' if parts['ipv4'] or parts['ipv6'] else 'localhost',
-            'port': '6379',
-            'path': '/0',
-        }
+
+else:
+    class KeyDBDsn(AnyUrl):
+        __slots__ = ()
+        allowed_schemes = set(_ALLOWED_SCHEMES)
+        host_required = False
+
+        @staticmethod
+        def get_default_parts(parts: Parts) -> Parts:
+            return {
+                'domain': '' if parts['ipv4'] or parts['ipv6'] else 'localhost',
+                'port': '6379',
+                'path': '/0',
+            }
+
 
 class KeyDBUri(BaseModel):
 
     dsn: KeyDBDsn
 
-    @lazyproperty
+    @property
     def host(self):
+        """
+        Returns the host for the uri
+        """
         return self.dsn.host
 
-    @lazyproperty
+    @property
     def port(self):
+        """
+        Returns the port for the uri
+        """
         return self.dsn.port
 
-    @lazyproperty
+    @property
     def path(self):
+        """
+        Returns the path for the uri
+        """
         return self.dsn.path
     
-    @lazyproperty
+    @property
     def username(self):
-        return self.dsn.user
+        """
+        Returns the username for the uri
+        """
+        return self.dsn.username if PYD_VERSION == 2 else self.dsn.user
 
-    @lazyproperty
+    @property
     def password(self):
         return self.dsn.password
 
-    @lazyproperty
+    @property
     def db_id(self):
         return int(self.dsn.path[1:]) if self.dsn.path else None
 
-    @lazyproperty
+    @property
     def ssl(self):
-        return self.dsn.scheme in {'rediss', 'keydbs'}
+        return self.dsn.scheme in {'rediss', 'keydbs', 'dflys'}
 
-    @lazyproperty
+    @property
     def uri(self):
         return str(self.dsn)
     
-    @lazyproperty
+    @property
     def connection(self):
         return str(self.dsn)
     
-    @lazyproperty
+    @property
     def uri_no_auth(self):
         if self.has_auth:
             return str(self.dsn).replace(f'{self.auth_str}', '***')
         return str(self.dsn)
     
-    @lazyproperty
+    @property
     def auth_str(self):
-        if self.dsn.user:
-            return f'{self.dsn.user}:{self.password}' if self.password else f'{self.dsn.user}'
+        if self.username:
+            return f'{self.username}:{self.password}' if self.password else f'{self.username}'
         return f':{self.dsn.password}' if self.dsn.password else ''
 
-    @lazyproperty
+    @property
     def has_auth(self):
-        return self.dsn.user or self.dsn.password
+        return self.username or self.password
 
     def __str__(self):
         return f'{self.uri_no_auth}'
@@ -451,14 +488,14 @@ class KeyDBUri(BaseModel):
     def __repr__(self):
         return f'<KeyDBUri {self.uri_no_auth}>'
     
-    @lazyproperty
+    @property
     def key(self):
         """
         Returns the hashkey for the uri
         """
         return hashlib.md5(self.uri.encode('ascii')).hexdigest()
 
-    @lazyproperty
+    @property
     def connection_args(self) -> typing.List[str]:
         """
         Returns the connection arguments for CLI usage

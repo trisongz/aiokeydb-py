@@ -8,6 +8,10 @@
 
 - Rework `pydantic` dependencies to support both `v1/v2`.
 
+### rc1
+
+- Rework `cachify` module
+
 
 
 ## 0.1.31 (2023-03-29)

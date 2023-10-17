@@ -25,9 +25,9 @@ try:
         """
         def decorator(func):
             _pre_kw = kwargs.pop('pre', None)
-            if _pre_kw is True:
-                kwargs['mode'] = 'before'
+            kwargs['mode'] = 'before' if _pre_kw is True else kwargs.get('mode', 'wrap')
             return base_root_validator(*args, **kwargs)(func)
+
         return decorator
 
     def pre_root_validator(*args, **kwargs):
