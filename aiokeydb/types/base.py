@@ -418,6 +418,14 @@ class KeyDBUri(BaseModel):
 
     dsn: KeyDBDsn
 
+    @validator('dsn')
+    def validate_dsn(cls, v):
+        if isinstance(v, str):
+            v = KeyDBDsn(v)
+        if v.scheme not in _ALLOWED_SCHEMES:
+            raise ValueError(f'Invalid scheme {v.scheme} for KeyDBUri')
+        return v
+
     @property
     def host(self):
         """
