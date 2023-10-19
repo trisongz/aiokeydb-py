@@ -592,6 +592,7 @@ class TaskQueue:
         """
         Dumps a job.
         """
+        # logger.info(f"Serializing Job: {job}", prefix = f'{self.serializer.__name__}', colored = True)
         try:
             return self.serializer.dumps(job.to_dict())
         except Exception as e:
@@ -604,6 +605,7 @@ class TaskQueue:
         """
         if not job_bytes: return None
         job_dict: typing.Dict = self.serializer.loads(job_bytes)
+        # logger.info(f"Deserialized Job: {job_dict}", prefix = f'{self.serializer.__name__}', colored = True)
         assert (
                 job_dict.pop("queue") == self.queue_name
         ), f"Job {job_dict} fetched by wrong queue: {self.queue_name}"
@@ -855,7 +857,7 @@ class TaskQueue:
         Update a job.
         """
         job.touched = now()
-        await self.ctx.async_set(job.id, self.serialize(job))
+        await self.ctx.async_client.set(job.id, self.serialize(job))
         await self.notify(job)
         if self.function_tracker_enabled: 
             await self.track_job_id(job)
@@ -2033,13 +2035,15 @@ class TaskQueue:
         Syncs the current queue info with keydb
         """
         queue_info = await self.info(jobs = True)
-        await self.ctx.async_set(self.queue_info_key, json.dumps(queue_info, cls = ObjectEncoder), ex = 60)
+        # await self.ctx.async_set(self.queue_info_key, json.dumps(queue_info, cls = ObjectEncoder), ex = 60)
+        await self.ctx.async_client.set(self.queue_info_key, json.dumps(queue_info, cls = ObjectEncoder), ex = 60)
     
     async def fetch_queue_info(self):
         """
         Fetches the current queue info from keydb
         """
-        queue_info = await self.ctx.async_get(self.queue_info_key)
+        # queue_info = await self.ctx.async_get(self.queue_info_key)
+        queue_info = await self.ctx.async_client.get(self.queue_info_key)
         return json.loads(queue_info) if queue_info else {}
 
     async def stats(self, ttl: int = 60):
@@ -2291,7 +2295,8 @@ class TaskQueue:
         async with self._fail_ok(verbose = False):
             function_tracker = await self._get_function_tracker(job.function, none_ok = False)
             function_tracker.track_job(job)
-            await self.ctx.async_set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
+            # await self.ctx.async_set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
+            await self.ctx.async_client.set(f'{self._stats.function_tracker_key}.{job.function}', function_tracker.serialize(), ex = self.function_tracker_ttl)
         await self.track_job_id(job)
 
     async def get_function_trackers(self) -> typing.Dict[str, FunctionTracker]:
@@ -2302,7 +2307,8 @@ class TaskQueue:
         _keys = await self.ctx.async_keys(f'{self._stats.function_tracker_key}.*')
         _function_trackers = {}
         for key in _keys:
-            function_tracker = await self.ctx.async_get(key, default = None)
+            # function_tracker = await self.ctx.async_get(key, default = None)
+            function_tracker = await self.ctx.async_client.get(key)
             if function_tracker:
                 function_tracker = FunctionTracker.deserialize(function_tracker)
                 _function_trackers[function_tracker.function] = function_tracker
