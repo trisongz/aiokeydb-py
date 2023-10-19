@@ -8,10 +8,10 @@ import anyio
 import threading
 
 from contextlib import asynccontextmanager, suppress
-from lazyops.utils.logs import default_logger as logger
 # from lazyops.utils import logger
 from lazyops.utils.serialization import ObjectEncoder
 from lazyops.utils.helpers import create_background_task
+from aiokeydb.utils.logs import logger
 from aiokeydb.types.base import BaseModel, Field, validator
 from aiokeydb.types.base import KeyDBUri, lazyproperty
 from aiokeydb.types.session import KeyDBSession
@@ -152,7 +152,11 @@ class QueueStats(BaseModel):
     
     @lazyproperty
     def node_name(self) -> str:
-        get_hostname()
+        return get_hostname()
+    
+    @lazyproperty
+    def process_id(self) -> int:
+        return os.getpid()
 
 class PushQueue:
     def __init__(
@@ -372,6 +376,8 @@ class TaskQueue:
         self.logging_max_length = logging_max_length
         self.heartbeat_ttl = heartbeat_ttl or self.settings.worker.heartbeat_interval
         self._worker_name: str = None
+        self._worker_log_name: str = None
+        self._queue_log_name: str = None
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.queue_pid: int = os.getpid()
         self._push_queue_kwargs = {
@@ -506,25 +512,32 @@ class TaskQueue:
         """
         Returns a logger for the queue.
         """
+        if not self._worker_log_name:
+            self._worker_log_name = f'{self._stats.node_name}:{self._stats.process_id}'
         if job:
             return logger.bind(
                 job_id = job.id,
                 status = job.status,
-                worker_name = self._worker_name,
-                queue_name = getattr(job.queue, 'queue_name', None) or 'unknown queue',
+                worker_name = self._worker_log_name,
+                # self._worker_name,
+                queue_name = getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
                 kind = kind,
             )
         elif job_id:
             return logger.bind(
                 job_id = job_id,
-                worker_name = self._worker_name,
-                queue_name = self.queue_name,
+                worker_name = self._worker_log_name,
+                queue_name = self._queue_log_name or self.queue_name,
+                # worker_name = self._worker_name,
+                # queue_name = self.queue_name,
                 kind = kind,
             )
         else:
             return logger.bind(
-                worker_name = self._worker_name,
-                queue_name = self.queue_name,
+                worker_name = self._worker_log_name,
+                queue_name = self._queue_log_name or self.queue_name,
+                # worker_name = self._worker_name,
+                # queue_name = self.queue_name,
                 kind = kind,
             )
     

@@ -155,7 +155,24 @@ class Worker:
     
     @property
     def _worker_name(self):
+        """
+        Returns the worker name.
+        """
         return f"{self.worker_host}.{self.name}.{self.worker_pid}"
+    
+    @property
+    def _queue_log_name(self):
+        """
+        Returns the queue log name.
+        """
+        return self.name
+
+    @property
+    def _worker_log_name(self):
+        """
+        Returns the worker log name.
+        """
+        return f"{self.worker_host}:{self.worker_pid}"
     
     @property
     def _is_ctx_retryable(self) -> bool:
@@ -189,16 +206,19 @@ class Worker:
         """
         if job:
             return logger.bind(
-                worker_name = self._worker_name,
+                # worker_name = self._worker_name,
+                worker_name = self._worker_log_name,
                 job_id = job.id,
                 status = job.status,
-                queue_name = getattr(job.queue, 'queue_name', self.queue_name) or 'unknown queue',
+                queue_name = getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
                 kind = kind,
             )
         else:
             return logger.bind(
-                worker_name = self._worker_name,
-                queue_name = self.queue_name,
+                # worker_name = self._worker_name,
+                # queue_name = self.queue_name,
+                worker_name = self._worker_log_name,
+                queue_name = self._queue_log_name,
                 kind = kind,
             )
 
@@ -227,14 +247,15 @@ class Worker:
         """
         Builds the startup log message.
         """
-        _msg = f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version}'
+        # _msg = f'{self._worker_identity}: {self.worker_host}.{self.name} v{self.settings.version}'
+        _msg = f'{self._worker_identity}: v{self.settings.version}'
+        _msg += f'\n- {ColorMap.cyan}[Node Name]{ColorMap.reset}: {ColorMap.bold}{self.worker_host}.{self.name}{ColorMap.reset}'
         _msg += f'\n- {ColorMap.cyan}[Worker ID]{ColorMap.reset}: {ColorMap.bold}{self.worker_id}{ColorMap.reset}'
         if self._is_primary_worker:
             _msg += f'\n- {ColorMap.cyan}[Queue]{ColorMap.reset}: {ColorMap.bold}{self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}{ColorMap.reset}'
             _msg += f'\n- {ColorMap.cyan}[Registered]{ColorMap.reset}: {ColorMap.bold}{len(self.functions)} functions, {len(self.cron_jobs)} cron jobs{ColorMap.reset}'
             _msg += f'\n- {ColorMap.cyan}[Concurrency]{ColorMap.reset}: {ColorMap.bold}{self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts{ColorMap.reset}'
             if self.verbose_startup:
-
                 _msg += f'\n- {ColorMap.cyan}[Serializer]{ColorMap.reset}: {self.queue.serializer}'
                 _msg += f'\n- {ColorMap.cyan}[Worker Attributes]{ColorMap.reset}: {self.worker_attributes}'
                 if self._is_ctx_retryable:
@@ -265,7 +286,9 @@ class Worker:
         self.context = {"worker": self, "queue": self.queue, "keydb": self.queue.ctx, "pool": get_thread_pool(), "vars": {}}
         self.worker_attributes['name'] = self.name
         self.queue._worker_name = self._worker_name
-
+        self.queue._worker_log_name = self._worker_log_name
+        self.queue._queue_log_name = self._queue_log_name
+        
         try:
             self.event = asyncio.Event()
             loop = asyncio.get_running_loop()
@@ -298,7 +321,8 @@ class Worker:
 
             await self.event.wait()
         finally:
-            self.logger(kind = "shutdown").warning(f'{self._worker_identity}: {self.worker_host}.{self.name} is shutting down.')
+            # self.logger(kind = "shutdown").warning(f'{self._worker_identity}: {self.worker_host}.{self.name} is shutting down.')
+            self.logger(kind = "shutdown").warning(f'{self._worker_identity}: {self.worker_host}.{self.name}')
             if self.shutdown:
                 for func in self.shutdown:
                     await func(self.context)
