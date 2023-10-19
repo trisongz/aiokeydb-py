@@ -500,7 +500,7 @@ class Job(BaseModel):
         data = self.dict(
             exclude_none = True,
             exclude_defaults = True,
-            # exclude = {"kwargs"} if self.queue.serializer is not None else None,
+            exclude = {"kwargs"} if self.queue.serializer is not None else None,
         )
         for key, value in data.items():
             if key == "meta" and not value:
@@ -509,7 +509,7 @@ class Job(BaseModel):
                 value = value.queue_name
             result[key] = value
         result['queue'] = self.queue.queue_name
-        # if self.queue.serializer is not None: result["kwargs"] = self.kwargs
+        if self.queue.serializer is not None: result["kwargs"] = self.kwargs
         return result
 
 

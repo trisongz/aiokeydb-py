@@ -596,7 +596,11 @@ class TaskQueue:
         try:
             return self.serializer.dumps(job.to_dict())
         except Exception as e:
+            from lazyops.utils.debugging import inspect_serializability
             logger.trace(f"Unable to serialize job: {job}", e, depth = 2)
+            data = job.to_dict()
+            for k,v in data.get('kwargs', {}).items():
+                inspect_serializability(v, name = k)
             raise e
 
     def deserialize(self, job_bytes: bytes):
