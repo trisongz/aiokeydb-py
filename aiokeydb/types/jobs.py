@@ -262,7 +262,7 @@ class FunctionTracker(BaseModel):
         """
         Deserializes the function tracker
         """
-        return cls.parse_raw(data)
+        return cls.parse_obj(data)
     
     @property
     def data_dict(self) -> dict:
@@ -319,8 +319,8 @@ class Job(BaseModel):
     """
 
     function: str
-    kwargs: typing.Optional[dict] = None
-    queue: typing.Optional[typing.Any] = None
+    kwargs: typing.Optional[typing.Dict[str, typing.Any]] = Field(default=None)
+    
     
     # queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None
     key: typing.Optional[str] = Field(default_factory = get_default_job_key)
@@ -350,11 +350,13 @@ class Job(BaseModel):
 
     # Allow for passing in a callback function to be called after the job is run
     job_callback: typing.Optional[typing.Union[str, typing.Callable]] = None
-    job_callback_kwargs: typing.Optional[dict] = Field(default_factory=dict)
+    job_callback_kwargs: typing.Optional[typing.Dict[str, typing.Any]] = Field(default_factory=dict)
     bypass_lock: typing.Optional[bool] = None
 
     if typing.TYPE_CHECKING:
         queue: typing.Optional[typing.Union['TaskQueue', typing.Any]] = None
+    else:
+        queue: typing.Optional[typing.Any] = Field(default = None, exclude = True)
 
     
     @validator("job_callback")
@@ -498,7 +500,7 @@ class Job(BaseModel):
         data = self.dict(
             exclude_none = True,
             exclude_defaults = True,
-            exclude = {"kwargs"} if self.queue.serializer is not None else None,
+            # exclude = {"kwargs"} if self.queue.serializer is not None else None,
         )
         for key, value in data.items():
             if key == "meta" and not value:
@@ -506,7 +508,8 @@ class Job(BaseModel):
             if key == "queue" and value:
                 value = value.queue_name
             result[key] = value
-        if self.queue.serializer is not None: result["kwargs"] = self.kwargs
+        result['queue'] = self.queue.queue_name
+        # if self.queue.serializer is not None: result["kwargs"] = self.kwargs
         return result
 
 
@@ -676,7 +679,8 @@ class Job(BaseModel):
         """
         Returns the fields of the job.
         """
-        return [field.name for field in self.__fields__.values()]
+        return self.get_model_field_names()
+        # return [field.name for field in self.__fields__.values()]
 
     def replace(self, job: 'Job'):
         """
@@ -691,7 +695,8 @@ class Job(BaseModel):
         """
         Returns the fields of the job.
         """
-        return [field.name for field in cls.__fields__.values()]
+        return cls.get_model_field_names()
+        # return [field.name for field in cls.__fields__.values()]
     
     @classmethod
     def from_kwargs(cls, job_or_func: typing.Union[str, 'Job', typing.Callable], **kwargs) -> 'Job':

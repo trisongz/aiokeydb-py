@@ -171,6 +171,7 @@ class KeyDBSession:
         self.uri: KeyDBUri = uri
         self.name = name
         self.db_id = db_id or uri.db_id
+        config = config or {}
         self.config = config
         self.settings = settings or get_keydb_settings()
         self.encoder = encoder or Encoder(
@@ -179,7 +180,7 @@ class KeyDBSession:
             decode_responses = True,
         )
 
-        self.serializer = serializer # or self.settings.get_serializer()
+        self.serializer = serializer or self.settings.get_serializer()
 
         self.cache_prefix = cache_prefix or self.settings.cache_prefix
         self.cache_ttl = cache_ttl if cache_ttl is not None else self.settings.cache_ttl
@@ -191,6 +192,7 @@ class KeyDBSession:
         )
 
         # Enhanced Dict
+        
         self.dict_hash_key: typing.Optional[str] = config.get('dict_hash_key', f'data:{self.name}:dict')
         self.dict_encoder: typing.Callable = config.get('dict_encoder', self.serializer.dumps)
         self.dict_decoder: typing.Callable = config.get('dict_decoder', self.serializer.loads)

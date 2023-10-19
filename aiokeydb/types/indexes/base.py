@@ -127,7 +127,7 @@ class BaseKDBIndex(ABC):
         """
         Returns the session for the given name
         """
-        from aiokeydb.v2 import KeyDBClient
+        from aiokeydb import KeyDBClient
         return KeyDBClient.get_session(name = name, **kwargs)
 
 
@@ -186,8 +186,10 @@ class BaseKDBIndex(ABC):
         Encodes the value
         """
         if self.is_primitive(value): return value
-        with contextlib.suppress(Exception):
+        try:
             return self.srl.dumps(value) if self.serialization_enabled else self.enc.encode(value)
+        except Exception as e:
+            self.log.trace(f"Failed to Encode value: ({type(value)}) {value}\nEncoder: {self.enc}\nSerializer: {self.srl}\nSerialization Enabled: {self.serialization_enabled}\n", e, depth = 4)
         with contextlib.suppress(Exception):
             return self.enc.encode(value)
         

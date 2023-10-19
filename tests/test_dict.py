@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from aiokeydb import KeyDBClient
 from aiokeydb.types.cachify import CachifyKwargs
+from aiokeydb.types.jobs import FunctionTracker, Job
 from lazyops.types.models import BaseModel, Field
 from typing import ClassVar
 
@@ -24,6 +25,8 @@ data_dict = {
     "key1": "value1",
     "key2": 234,
     "key3": CachifyKwargs(),
+    "key4": FunctionTracker(function = 'test'),
+    "key5": Job(function = 'test'),
     # DummyObject(key1 = time.time()),
 }
 

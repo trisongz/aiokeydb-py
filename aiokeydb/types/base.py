@@ -5,7 +5,7 @@ import threading
 import functools
 import hashlib
 
-from .compat import validator, root_validator, Field, PYD_VERSION
+from .compat import validator, root_validator, Field, PYD_VERSION, get_pyd_field_names, get_pyd_dict, pyd_parse_obj, get_pyd_schema
 from .compat import BaseSettings as _BaseSettings
 from .compat import BaseModel as _BaseModel
 from pydantic.networks import AnyUrl, Url, MultiHostUrl
@@ -364,9 +364,16 @@ class BaseSettings(_BaseSettings):
 
 
 class BaseModel(_BaseModel):
-    class Config:
-        extra = 'allow'
-        arbitrary_types_allowed = True
+
+
+    if PYD_VERSION == 1:
+        class Config:
+            extra = 'allow'
+            arbitrary_types_allowed = True
+    else:
+        model_config = {'arbitrary_types_allowed': True}
+        # model_config = {'extra': 'allow', 'arbitrary_types_allowed': True}
+
 
     def get(self, name, default: typing.Any = None):
         return getattr(self, name, default)
@@ -375,7 +382,49 @@ class BaseModel(_BaseModel):
         for k, v in kwargs.items():
             if not hasattr(self, k): continue
             setattr(self, k, v)
+    
 
+    # @classproperty
+    # def model_field_names(cls) -> typing.List[str]:
+    #     """
+    #     Returns the model fields names
+    #     """
+    #     return get_pyd_field_names(cls)
+    
+    @classmethod
+    def get_model_field_names(cls) -> typing.List[str]:
+        """
+        Get the model fields
+        """
+        return get_pyd_field_names(cls)
+    
+
+    # @classmethod
+    # def parse_obj(
+    #     cls,
+    #     obj: typing.Any,
+    #     strict: typing.Optional[bool] = False,
+    #     from_attributes: typing.Optional[bool] = True,
+    #     **kwargs
+    # ) -> 'BaseModel':
+    #     """
+    #     Parses an object into the resource
+    #     """
+    #     return pyd_parse_obj(cls, obj, strict = strict, from_attributes = from_attributes, **kwargs)
+    
+    # def dict(self, **kwargs):
+    #     """
+    #     Returns the dict representation of the response
+    #     """
+    #     return get_pyd_dict(self, **kwargs)
+
+    # def schema(self, **kwargs):
+    #     """
+    #     Returns the dict representation of the response
+    #     """
+    #     return get_pyd_schema(self, **kwargs)
+
+    
 _ALLOWED_SCHEMES = [
     'redis',
     'rediss',

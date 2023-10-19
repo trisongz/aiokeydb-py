@@ -592,7 +592,11 @@ class TaskQueue:
         """
         Dumps a job.
         """
-        return self.serializer.dumps(job.to_dict())
+        try:
+            return self.serializer.dumps(job.to_dict())
+        except Exception as e:
+            logger.trace(f"Unable to serialize job: {job}", e, depth = 2)
+            raise e
 
     def deserialize(self, job_bytes: bytes):
         """
@@ -873,7 +877,7 @@ class TaskQueue:
     async def _get_job_by_id(self, job_id):
         # async with self._op_sem:
         async with self.op_sephamore():
-            return self.deserialize(await self.ctx.async_get(job_id))
+            return self.deserialize(await self.ctx.async_client.get(job_id))
 
     async def wait_for_job_completion(self, job_id: str, results_only: typing.Optional[bool] = False, interval: float = 0.5) -> typing.Any:
         """
