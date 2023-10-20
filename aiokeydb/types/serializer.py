@@ -4,6 +4,7 @@ Base Serializer Class that all other serializers should inherit from.
 """
 
 import typing
+from types import ModuleType
 
 class BaseSerializer:
 
@@ -21,3 +22,17 @@ class BaseSerializer:
         """
         raise NotImplementedError
 
+
+    @staticmethod
+    def register_module(module: ModuleType):
+        """
+        Dummy method that should be overridden by serializers that support
+        """
+        return
+
+    @staticmethod
+    def unregister_module(module: ModuleType):
+        """
+        Dummy method that should be overridden by serializers that support
+        """
+        return

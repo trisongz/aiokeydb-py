@@ -1,11 +1,14 @@
 from __future__ import absolute_import
 
 from enum import Enum
-from typing import Type
+from typing import Type, TypeVar
 from aiokeydb.types import BaseSerializer
 from aiokeydb.serializers._json import JsonSerializer, OrJsonSerializer
-from aiokeydb.serializers._pickle import PickleSerializer, DillSerializer, DillSerializerv2, PickleSerializerv2
+from aiokeydb.serializers._pickle import PickleSerializer, DillSerializer, DillSerializerv2, PickleSerializerv2, CloudPickleSerializer
 from aiokeydb.serializers._msgpack import MsgPackSerializer
+
+
+SerializerT = TypeVar('SerializerT', bound = Type[BaseSerializer])
 
 class SerializerType(str, Enum):
     """
@@ -21,7 +24,9 @@ class SerializerType(str, Enum):
     picklev2 = 'picklev2'
     dillv2 = 'dillv2'
 
-    def get_serializer(self) -> Type[BaseSerializer]:
+    cloudpickle = 'cloudpickle'
+
+    def get_serializer(self) -> SerializerT:
         """
         Default Serializer = Dill
         """
@@ -38,10 +43,12 @@ class SerializerType(str, Enum):
             return PickleSerializerv2
         elif self == SerializerType.dillv2:
             return DillSerializerv2
+        elif self == SerializerType.cloudpickle:
+            return CloudPickleSerializer
         elif self == SerializerType.msgpack:
             return MsgPackSerializer
         elif self == SerializerType.default:
-            return DillSerializerv2
+            return DillSerializer
         else:
             raise ValueError(f'Invalid serializer type: {self}')
 
