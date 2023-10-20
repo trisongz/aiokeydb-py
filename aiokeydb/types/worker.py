@@ -255,8 +255,8 @@ class Worker:
             _msg += f'\n- {ColorMap.cyan}[Queue]{ColorMap.reset}: {ColorMap.bold}{self.queue_name} @ {self.queue.uri} DB: {self.queue.db_id}{ColorMap.reset}'
             _msg += f'\n- {ColorMap.cyan}[Registered]{ColorMap.reset}: {ColorMap.bold}{len(self.functions)} functions, {len(self.cron_jobs)} cron jobs{ColorMap.reset}'
             _msg += f'\n- {ColorMap.cyan}[Concurrency]{ColorMap.reset}: {ColorMap.bold}{self.concurrency}/jobs, {self.broadcast_concurrency}/broadcasts{ColorMap.reset}'
+            _msg += f'\n- {ColorMap.cyan}[Serializer]{ColorMap.reset}: {self.queue.serializer}'
             if self.verbose_startup:
-                _msg += f'\n- {ColorMap.cyan}[Serializer]{ColorMap.reset}: {self.queue.serializer}'
                 _msg += f'\n- {ColorMap.cyan}[Worker Attributes]{ColorMap.reset}: {self.worker_attributes}'
                 if self._is_ctx_retryable:
                     _msg += f'\n- {ColorMap.cyan}[Retryable]{ColorMap.reset}: {self._is_ctx_retryable}'
