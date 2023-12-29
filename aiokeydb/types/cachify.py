@@ -44,6 +44,17 @@ async def run_as_coro(
     """
     return await ThreadPooler.asyncish(func, *args, **kwargs)
 
+def isclassmethod(method):
+    bound_to = getattr(method, '__self__', None)
+    if not isinstance(bound_to, type):
+        # must be bound to a class
+        return False
+    name = method.__name__
+    for cls in bound_to.__mro__:
+        descriptor = vars(cls).get(name)
+        if descriptor is not None:
+            return isinstance(descriptor, classmethod)
+    return False
 
 @contextlib.contextmanager
 def safely(
@@ -98,7 +109,11 @@ def hash_key(
     :param bool exclude_default_values: exclude default values from cache key
     :return: cache key tuple
     """
-    if is_class_method and args: args = args[1:]
+    if is_class_method and args: 
+        # logger.warning(f'Class Method: {args}')
+        args = args[1:]
+
+        
     key = args or ()
     if kwargs:
         if exclude_keys: kwargs = {k: v for k, v in kwargs.items() if k not in exclude_keys}
@@ -980,7 +995,7 @@ class CachifyKwargs(BaseModel):
         Validates if the function is a class method
         """
         if self.is_class_method is not None: return
-        self.is_class_method = hasattr(func, '__class__') and inspect.isclass(func.__class__)
+        self.is_class_method = hasattr(func, '__class__') and inspect.isclass(func.__class__) and isclassmethod(func)
     
     async def arun_post_init_hook(self, func: Callable, *args, **kwargs) -> None:
         """

@@ -1882,26 +1882,30 @@ class KeyDBSession:
     def hset(
         self,
         name: str,
-        key: str,
-        value: typing.Any,
+        key: typing.Optional[str] = None,
+        value: typing.Optional[typing.Any] = None,
+        mapping: typing.Optional[dict] = None,
+        items: typing.Optional[list] = None,
         **kwargs
     ) -> bool:
         """
         Set the string value of a hash field
         """
-        return self.client.hset(name, key, value, **kwargs)
+        return self.client.hset(name, key = key, value = value, mapping = mapping, items = items, **kwargs)
     
     async def async_hset(
         self,
         name: str,
-        key: str,
-        value: typing.Any,
+        key: typing.Optional[str] = None,
+        value: typing.Optional[typing.Any] = None,
+        mapping: typing.Optional[dict] = None,
+        items: typing.Optional[list] = None,
         **kwargs
     ) -> bool:
         """
         Set the string value of a hash field
         """
-        return await self.async_client.hset(name, key, value, **kwargs)
+        return await self.async_client.hset(name, key = key, value = value, mapping = mapping, items = items, **kwargs)
     
     def hsetnx(
         self,

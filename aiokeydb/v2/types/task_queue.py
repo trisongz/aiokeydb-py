@@ -374,6 +374,7 @@ class TaskQueue:
         self._worker_name: str = None
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.queue_pid: int = os.getpid()
+        self._log_name: typing.Optional[str] = kwargs.pop('log_name', None)
         self._push_queue_kwargs = {
             'push_to_queue_enabled': push_to_queue_enabled,
             'push_to_queue_key': push_to_queue_key,
@@ -502,6 +503,13 @@ class TaskQueue:
             name, stages = (func, None) if isinstance(func, str) else func
             self.settings.worker.add_function_to_silenced(name, silenced_stages = stages)
 
+    @property
+    def log_name(self) -> str:
+        """
+        Returns the log name for the queue.
+        """
+        return self._log_name or self.queue_name
+
     def logger(self, job: 'Job' = None, kind: str = "enqueue", job_id: typing.Optional[str] = None,):
         """
         Returns a logger for the queue.
@@ -518,13 +526,13 @@ class TaskQueue:
             return logger.bind(
                 job_id = job_id,
                 worker_name = self._worker_name,
-                queue_name = self.queue_name,
+                queue_name = self.log_name,
                 kind = kind,
             )
         else:
             return logger.bind(
                 worker_name = self._worker_name,
-                queue_name = self.queue_name,
+                queue_name = self.log_name,
                 kind = kind,
             )
     

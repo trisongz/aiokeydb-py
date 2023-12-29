@@ -151,10 +151,14 @@ class Worker:
             self.functions[name] = function
         self._worker_identity: str = f'[{self.worker_pid}] {self.settings.app_name or "KeyDBWorker"}'
         self._tasks_idx: int = 0
+        self._log_name = kwargs.pop("log_name", None)
     
     @property
     def _worker_name(self):
-        return f"{self.worker_host}.{self.name}.{self.worker_pid}"
+        """
+        Returns the worker name.
+        """
+        return self._log_name or f"{self.worker_host}.{self.name}.{self.worker_pid}"
     
     @property
     def _is_ctx_retryable(self) -> bool:

@@ -5,6 +5,7 @@ import enum
 import typing
 import datetime
 import croniter
+import contextlib
 
 from aiokeydb.types.base import BaseModel, lazyproperty, Field, validator
 from aiokeydb.utils.queue import (
@@ -623,7 +624,9 @@ class Job(BaseModel):
         """
         for k, v in kwargs.items():
             setattr(self, k, v)
-        await self.queue.update(self)
+        # Allow Updates without breaking if something goes wrong
+        with contextlib.suppress(Exception):
+            await self.queue.update(self)
     
     # async def reset(self):
     #     """
@@ -639,14 +642,24 @@ class Job(BaseModel):
             self.job_progress.total = total
         if completed is not None:
             self.job_progress.completed = completed
-        await self.queue.update(self)
+        with contextlib.suppress(Exception):
+            await self.queue.update(self)
+
+    async def add_progress_total(self, total: typing.Optional[int] = 1):
+        """
+        Adds to the job's progress total.
+        """
+        self.job_progress.total += total
+        with contextlib.suppress(Exception):
+            await self.queue.update(self)
     
     async def incr_progress(self, incr: typing.Optional[int] = 1):
         """
         Increments the job's progress.
         """
         self.job_progress.completed += incr
-        await self.queue.update(self)
+        with contextlib.suppress(Exception):
+            await self.queue.update(self)
 
     @property
     def _progress(self) -> typing.Optional[float]:
