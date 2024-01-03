@@ -799,7 +799,12 @@ class CachifyKwargs(BaseModel):
             return ENOVAL
         
         create_background_task(self.avalidate_cache_policies, key, *args, **kwargs)
-        return await self.adecode_hit(value)
+        try:
+            result = await self.adecode_hit(value, *args, **kwargs)
+            if result is not None: return result
+        except Exception as e:
+            if self.verbose: logger.trace(f'[{self.cache_field}:{key}] Decode Exception', error = e)
+        return ENOVAL
         
     async def aset(self, key: str, value: Any, *args, **kwargs) -> None:
         """
@@ -959,7 +964,12 @@ class CachifyKwargs(BaseModel):
             return ENOVAL
         
         create_background_task(self.validate_cache_policies, key, *args, **kwargs)
-        return self.decode_hit(value)
+        try:
+            result = self.decode_hit(value, *args, **kwargs)
+            if result is not None: return result
+        except Exception as e:
+            if self.verbose: logger.trace(f'[{self.cache_field}:{key}] Decode Exception', error = e)
+        return ENOVAL
         
     def set(self, key: str, value: Any, *args, **kwargs) -> None:
         """

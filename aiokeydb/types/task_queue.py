@@ -343,6 +343,10 @@ class TaskQueue:
         self.queue_name = queue_name if queue_name is not None else self.settings.worker.queue_name
         self.serializer = serializer if serializer is not None else self.settings.worker.job_serializer.get_serializer()
         
+
+        self._queue_log_name: typing.Optional[str] = kwargs.pop('queue_log_name', None)
+        self._worker_log_name: typing.Optional[str] = kwargs.pop('worker_log_name', None)
+
         self._ctx_kwargs = {
             'db_id': db if db is not None else self.settings.worker.db,
             **kwargs        
@@ -376,8 +380,8 @@ class TaskQueue:
         self.logging_max_length = logging_max_length
         self.heartbeat_ttl = heartbeat_ttl or self.settings.worker.heartbeat_interval
         self._worker_name: str = None
-        self._worker_log_name: str = None
-        self._queue_log_name: str = None
+        # self._worker_log_name: str = None
+        # self._queue_log_name: str = None
         self.is_leader_process = is_leader_process if is_leader_process is not None else (self.settings.worker.is_leader_process if self.settings.worker.is_leader_process is not None else True)
         self.queue_pid: int = os.getpid()
         self._push_queue_kwargs = {
@@ -520,7 +524,7 @@ class TaskQueue:
                 status = job.status,
                 worker_name = self._worker_log_name,
                 # self._worker_name,
-                queue_name = getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
+                queue_name = self._queue_log_name, #  getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
                 kind = kind,
             )
         elif job_id:

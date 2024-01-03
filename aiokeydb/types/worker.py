@@ -140,6 +140,14 @@ class Worker:
             "worker_pid": self.worker_pid,
         })
         self.heartbeat_ttl = heartbeat_ttl if heartbeat_ttl is not None else self.queue.heartbeat_ttl
+        
+        # Log Names
+        self._worker_log_name = kwargs.pop("worker_log_name", None)
+        self._queue_log_name = kwargs.pop("queue_log_name", self.queue._queue_log_name) or self.name
+        if self._worker_log_name and not self.queue._worker_log_name:
+            self.queue._worker_log_name = self._worker_log_name
+        if not self._worker_log_name:
+            self._worker_log_name = f"{self.worker_host}:{self.worker_pid}"
 
         for job in self.cron_jobs:
             if not croniter.is_valid(job.cron):
@@ -160,19 +168,19 @@ class Worker:
         """
         return f"{self.worker_host}.{self.name}.{self.worker_pid}"
     
-    @property
-    def _queue_log_name(self):
-        """
-        Returns the queue log name.
-        """
-        return self.name
+    # @property
+    # def _queue_log_name(self):
+        # """
+        # Returns the queue log name.
+        # """
+        # return self.name
 
-    @property
-    def _worker_log_name(self):
-        """
-        Returns the worker log name.
-        """
-        return f"{self.worker_host}:{self.worker_pid}"
+    # @property
+    # def _worker_log_name(self):
+    #     """
+    #     Returns the worker log name.
+    #     """
+    #     return f"{self.worker_host}:{self.worker_pid}"
     
     @property
     def _is_ctx_retryable(self) -> bool:
@@ -210,7 +218,7 @@ class Worker:
                 worker_name = self._worker_log_name,
                 job_id = job.id,
                 status = job.status,
-                queue_name = getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
+                queue_name = self._queue_log_name, #  getattr(job.queue, 'queue_name', self._queue_log_name) or 'unknown queue',
                 kind = kind,
             )
         else:
