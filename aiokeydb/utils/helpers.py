@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import anyio
 import inspect
 import logging
+import contextlib
+from importlib.metadata import version
 from tenacity import retry, wait_exponential, stop_after_delay, before_sleep_log, retry_unless_exception_type, retry_if_exception_type, retry_if_exception
 from typing import Optional, Union, Tuple, Type, TYPE_CHECKING
 
@@ -142,3 +145,28 @@ def create_retryable_client(
         
 #     setattr(sess, '_is_retryable_wrapped', True)
 #     return sess
+
+# Any version above this may not support the async contextmanager
+if float(version('anyio').rsplit('.', 1)[0]) >= 3.8:
+    @contextlib.asynccontextmanager
+    async def afail_after(
+        delay: Optional[float] = None,
+        shield: bool = False
+    ):
+        """
+        Create a context manager which raises a :class:`TimeoutError` if does not finish in
+        time.
+
+        :param delay: maximum allowed time (in seconds) before raising the exception, or
+            ``None`` to disable the timeout
+        :param shield: ``True`` to shield the cancel scope from external cancellation
+        :return: a context manager that yields a cancel scope
+        :rtype: :class:`~typing.ContextManager`\\[:class:`~anyio.CancelScope`\\]
+
+        """
+        with anyio.fail_after(delay, shield=shield) as cancel_scope:
+            yield cancel_scope
+        
+else:
+    afail_after = anyio.fail_after
+

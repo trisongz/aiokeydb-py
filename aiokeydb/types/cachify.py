@@ -2,6 +2,8 @@ from __future__ import annotations
 
 """
 Custom KeyDB Caching
+
+- TODO: Add a global registry for cachify sessions
 """
 import time
 import anyio
@@ -21,6 +23,7 @@ from .compat import BaseModel, root_validator, get_pyd_dict
 from .base import ENOVAL
 from typing import Optional, Dict, Any, Callable, List, Union, TypeVar, Type, overload, TYPE_CHECKING
 from aiokeydb.utils.logs import logger
+from aiokeydb.utils.helpers import afail_after
 
 if TYPE_CHECKING:
     from .session import KeyDBSession
@@ -80,7 +83,8 @@ async def asafely(
     Safely runs a coroutine
     """
     try:
-        async with anyio.fail_after(timeout):
+        # async with anyio.fail_after(timeout):
+        async with afail_after(timeout):
             yield
     except Exception as e:
         if verbose: 
@@ -204,6 +208,8 @@ class CachifyKwargs(BaseModel):
     has_ran_post_init_hook: Optional[bool] = None
     is_async: Optional[bool] = None
 
+    hset_enabled: Optional[bool] = True
+
     if TYPE_CHECKING:
         session: Optional['KeyDBSession'] = None
     else:
@@ -314,6 +320,13 @@ class CachifyKwargs(BaseModel):
         for k, v in kwargs.items():
             if not hasattr(self, k): continue
             setattr(self, k, v)
+
+
+    def get_key(self, key: str) -> str:
+        """
+        Gets the Key
+        """
+        return key if self.hset_enabled else f'{self.cache_field}:{key}'
 
 
     def build_hash_name(self, func: Callable, *args, **kwargs) -> str:
@@ -450,10 +463,218 @@ class CachifyKwargs(BaseModel):
         if self.bypass_if is not None: 
             return await run_as_coro(self.bypass_if, *args, **kwargs)
         return False
+    
+
+    """
+    v3 Methods
+    """
+
+    def _get(self, key: str) -> Any:
+        """
+        Fetches the value from the cache
+        """
+        if self.hset_enabled:
+            return self.session.client.hget(self.cache_field, key)
+        return self.session.client.get(self.get_key(key))
+        
+    async def _aget(self, key: str) -> Any:
+        """
+        Fetches the value from the cache
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hget(self.cache_field, key)
+        return await self.session.async_client.get(self.get_key(key))
+        
+    def _set(self, key: str, value: Any) -> None:
+        """
+        Sets the value in the cache
+        """
+        if self.hset_enabled:
+            return self.session.client.hset(self.cache_field, key, value)
+        return self.session.client.set(self.get_key(key), value)
+
+    async def _aset(self, key: str, value: Any) -> None:
+        """
+        Sets the value in the cache
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hset(self.cache_field, key, value)
+        return await self.session.async_client.set(self.get_key(key), value)
+    
+    def _delete(self, key: str) -> None:
+        """
+        Deletes the value in the cache
+        """
+        if self.hset_enabled:
+            return self.session.client.hdel(self.cache_field, key)
+        return self.session.client.delete(self.get_key(key))
+    
+    async def _adelete(self, key: str) -> None:
+        """
+        Deletes the value in the cache
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hdel(self.cache_field, key)
+        return await self.session.async_client.delete(self.get_key(key))
+    
+    def _clear(self, *keys: str) -> None:
+        """
+        Clears the keys in the cache
+        """
+        if self.hset_enabled:
+            if keys:
+                return self.session.client.hdel(self.cache_field, *keys)
+            return self.session.client.delete(self.cache_field)
+        if keys:
+            return self.session.client.delete(*[self.get_key(k) for k in keys])
+        return self.session.client.delete(self.get_key(self.cache_field, '*'))
+    
+    async def _aclear(self, *keys: str) -> None:
+        """
+        Clears the keys in the cache
+        """
+        if self.hset_enabled:
+            if keys:
+                return await self.session.async_client.hdel(self.cache_field, *keys)
+            return await self.session.async_client.delete(self.cache_field)
+        if keys:
+            return await self.session.async_client.delete(*[self.get_key(k) for k in keys])
+        return await self.session.async_client.delete(self.get_key(self.cache_field, '*'))
+    
+    def _exists(self, key: str) -> bool:
+        """
+        Returns whether or not the key exists
+        """
+        if self.hset_enabled:
+            return self.session.client.hexists(self.cache_field, key)
+        return self.session.client.exists(self.get_key(key))
+    
+    async def _aexists(self, key: str) -> bool:
+        """
+        Returns whether or not the key exists
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hexists(self.cache_field, key)
+        return await self.session.async_client.exists(self.get_key(key))
+    
+    def _expire(self, key: str, ttl: int) -> None:
+        """
+        Expires the key
+        """
+        if self.hset_enabled:
+            return self.session.client.expire(self.cache_field, ttl)
+        return self.session.client.expire(self.get_key(key), ttl)
+    
+    async def _aexpire(self, key: str, ttl: int) -> None:
+        """
+        Expires the key
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.expire(self.cache_field, ttl)
+        return await self.session.async_client.expire(self.get_key(key), ttl)
+    
+    def _length(self) -> int:
+        """
+        Returns the size of the cache
+        """
+        if self.hset_enabled:
+            return self.session.client.hlen(self.cache_field)
+        return len(self.session.client.keys(self.get_key(self.cache_field, '*')))
+    
+    async def _alength(self) -> int:
+        """
+        Returns the size of the cache
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hlen(self.cache_field)
+        return len(await self.session.async_client.keys(self.get_key(self.cache_field, '*')))
+    
+    def _keys(self, decode: Optional[bool] = True) -> List[str]:
+        """
+        Returns the keys
+        """
+        if self.hset_enabled:
+            keys = self.session.client.hkeys(self.cache_field)
+        else:
+            keys = self.session.client.keys(self.get_key(self.cache_field, '*'))
+        if keys and decode: return [k.decode() if isinstance(k, bytes) else k for k  in keys]
+        return keys or []
+    
+    async def _akeys(self, decode: Optional[bool] = True) -> List[str]:
+        """
+        Returns the keys
+        """
+        if self.hset_enabled:
+            keys = await self.session.async_client.hkeys(self.cache_field)
+        else:
+            keys = await self.session.async_client.keys(self.get_key(self.cache_field, '*'))
+        if keys and decode: return [k.decode() if isinstance(k, bytes) else k for k  in keys]
+        return keys or []
+    
+    def _values(self, decode: Optional[bool] = False) -> List[Any]:
+        """
+        Returns the values
+        """
+        if self.hset_enabled:
+            values = self.session.client.hvals(self.cache_field)
+        else:
+            values = self.session.client.mget(self._keys(decode = False))
+        if values and decode: return [v.decode() if isinstance(v, bytes) else v for v  in values]
+        return values or []
+    
+    async def _avalues(self, decode: Optional[bool] = False) -> List[Any]:
+        """
+        Returns the values
+        """
+        if self.hset_enabled:
+            values = await self.session.async_client.hvals(self.cache_field)
+        else:
+            values = await self.session.async_client.mget(self._keys(decode = False))
+        if values and decode: return [v.decode() if isinstance(v, bytes) else v for v  in values]
+        return values or []
+
+    def _items(self, decode: Optional[bool] = True) -> Dict[str, Any]:
+        """
+        Returns the items
+        """
+        if self.hset_enabled:
+            items = self.session.client.hgetall(self.cache_field)
+        else:
+            items = self.session.client.mget(self._keys(decode = False))
+        if items and decode: return {(k.decode() if isinstance(k, bytes) else k): self.decode(v) for k, v in items.items()}
+        return items or {}
+
+    async def _aitems(self, decode: Optional[bool] = True) -> Dict[str, Any]:
+        """
+        Returns the items
+        """
+        if self.hset_enabled:
+            items = await self.session.async_client.hgetall(self.cache_field)
+        else:
+            items = await self.session.async_client.mget(self._keys(decode = False))
+        if items and decode: return {(k.decode() if isinstance(k, bytes) else k): self.decode(v) for k, v in items.items()}
+        return items or {}
+    
+    def _incr(self, key: str, amount: int = 1) -> int:
+        """
+        Increments the key
+        """
+        if self.hset_enabled:
+            return self.session.client.hincrby(self.cache_field, key, amount)
+        return self.session.client.incr(self.get_key(key), amount)
+    
+    async def _aincr(self, key: str, amount: int = 1) -> int:
+        """
+        Increments the key
+        """
+        if self.hset_enabled:
+            return await self.session.async_client.hincrby(self.cache_field, key, amount)
+        return await self.session.async_client.incr(self.get_key(key), amount)
 
     """
     Props
     """
+
     @property
     def has_post_init_hook(self) -> bool:
         """
@@ -476,7 +697,7 @@ class CachifyKwargs(BaseModel):
         n = 1
         if self.cache_max_size is not None: n += 2
         return n
-
+    
 
     @property
     async def anum_hits(self) -> int:
@@ -484,7 +705,7 @@ class CachifyKwargs(BaseModel):
         Returns the number of hits
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hget(self.cache_field, 'hits')
+            val = await self._aget('hits')
             return int(val) if val else 0
         
     @property
@@ -493,7 +714,7 @@ class CachifyKwargs(BaseModel):
         Returns the number of keys
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hlen(self.cache_field)
+            val = await self._alength()
             return max(int(val) - self.num_default_keys, 0) if val else 0
         
     @property
@@ -502,17 +723,15 @@ class CachifyKwargs(BaseModel):
         Returns the keys
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hkeys(self.cache_field)
-            return [v.decode() for v in val] if val else []
-        
+            return await self._akeys()
+            
     @property
     async def acache_values(self) -> List[Any]:
         """
         Returns the values
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hvals(self.cache_field)
-            return [v.decode() for v in val] if val else []
+            return await self._avalues()
     
     @property
     async def acache_items(self) -> Dict[str, Any]:
@@ -520,16 +739,15 @@ class CachifyKwargs(BaseModel):
         Returns the items
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hgetall(self.cache_field)
-            return {k.decode(): self.decode(v) for k, v in val.items()} if val else {}
-
+            return await self._aitems()
+        
     @property
     async def acache_keyhits(self) -> Dict[str, int]:
         """
         Returns the size of the cache
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hget(self.cache_field, 'keyhits')
+            val = await self._aget('keyhits')
             return {k.decode(): int(v) for k, v in val.items()} if val else {}
         
     @property
@@ -538,7 +756,7 @@ class CachifyKwargs(BaseModel):
         Returns the size of the cache
         """
         async with asafely(timeout = self.timeout):
-            val = await self.session.async_client.hget(self.cache_field, 'timestamps')
+            val = await self._aget('timestamps')
             return {k.decode(): float(v) for k, v in val.items()} if val else {}
     
 
@@ -564,7 +782,7 @@ class CachifyKwargs(BaseModel):
         Returns the number of hits
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hget(self.cache_field, 'hits')
+            val = self._get('hits')
             return int(val) if val else 0
         
     @property
@@ -573,7 +791,7 @@ class CachifyKwargs(BaseModel):
         Returns the number of keys
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hlen(self.cache_field)
+            val = self._length()
             return max(int(val) - self.num_default_keys, 0) if val else 0
         
     @property
@@ -582,17 +800,15 @@ class CachifyKwargs(BaseModel):
         Returns the keys
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hkeys(self.cache_field)
-            return [v.decode() for v in val] if val else []
-        
+            return self._keys()
+            
     @property
     def cache_values(self) -> List[Any]:
         """
         Returns the values
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hvals(self.cache_field)
-            return [v.decode() for v in val] if val else []
+            return self._values()
     
     @property
     def cache_items(self) -> Dict[str, Any]:
@@ -600,16 +816,15 @@ class CachifyKwargs(BaseModel):
         Returns the items
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hgetall(self.cache_field)
-            return {k.decode(): self.decode(v) for k, v in val.items()} if val else {}
-
+            return self._items()
+            
     @property
     def cache_keyhits(self) -> Dict[str, int]:
         """
         Returns the size of the cache
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hget(self.cache_field, 'keyhits')
+            val = self._get('keyhits')
             return {k.decode(): int(v) for k, v in val.items()} if val else {}
         
     @property
@@ -618,7 +833,7 @@ class CachifyKwargs(BaseModel):
         Returns the size of the cache
         """
         with safely(timeout = self.timeout):
-            val = self.session.client.hget(self.cache_field, 'timestamps')
+            val = self._get('timestamps')
             return {k.decode(): float(v) for k, v in val.items()} if val else {}
     
 
@@ -660,40 +875,47 @@ class CachifyKwargs(BaseModel):
         Invalidates the cache
         """
         with safely(timeout = self.timeout):
-            return self.session.client.hdel(self.cache_field, key, 'hits', 'timestamps', 'keyhits')
+            return self._delete(key, 'hits', 'timestamps', 'keyhits')
+            # return self.session.client.hdel(self.cache_field, key, 'hits', 'timestamps', 'keyhits')
 
     async def ainvalidate_cache(self, key: str) -> int:
         """
         Invalidates the cache
         """
         async with asafely(timeout = self.timeout):
-            return await self.session.async_client.hdel(self.cache_field, key, 'hits', 'timestamps', 'keyhits')
+            return await self._adelete(key, 'hits', 'timestamps', 'keyhits')
+            # return await self.session.async_client.hdel(self.cache_field, key, 'hits', 'timestamps', 'keyhits')
 
     async def aadd_key_hit(self, key: str):
         """
         Adds a hit to the cache key
         """
         async with asafely(timeout = self.timeout):
-            key_hits = await self.session.async_client.hget(self.cache_field, 'keyhits') or {}
+            key_hits = await self._aget('keyhits') or {}
+            # key_hits = await self.session.async_client.hget(self.cache_field, 'keyhits') or {}
             if key not in key_hits: key_hits[key] = 0
             key_hits[key] += 1
-            await self.session.async_client.hset(self.cache_field, 'keyhits', key_hits)
+            await self._aset('keyhits', key_hits)
+            # await self.session.async_client.hset(self.cache_field, 'keyhits', key_hits)
 
     async def aadd_key_timestamp(self, key: str):
         """
         Adds a timestamp to the cache key
         """
         async with asafely(timeout = self.timeout):
-            timestamps = await self.session.async_client.hget(self.cache_field, 'timestamps') or {}
+            timestamps = await self._aget('timestamps') or {}
+            # timestamps = await self.session.async_client.hget(self.cache_field, 'timestamps') or {}
             timestamps[key] = time.perf_counter()
-            await self.session.async_client.hset(self.cache_field, 'timestamps', timestamps)
+            await self._aset('timestamps', timestamps)
+            # await self.session.async_client.hset(self.cache_field, 'timestamps', timestamps)
 
     async def aadd_hit(self):
         """
         Adds a hit to the cache
         """
         async with asafely(timeout = self.timeout):
-            await self.session.async_client.hincrby(self.cache_field, 'hits', 1)
+            await self._aincr('hits')
+            # await self.session.async_client.hincrby(self.cache_field, 'hits', 1)
 
 
     async def aencode_hit(self, value: Any, *args, **kwargs) -> bytes:
@@ -784,7 +1006,8 @@ class CachifyKwargs(BaseModel):
             if self.super_verbose: logger.info(f'[{self.cache_field}:{key}] Not Retrieving')
             return ENOVAL
         try:
-            async with anyio.fail_after(self.timeout):
+            # async with anyio.fail_after(self.timeout):
+            async with afail_after(self.timeout):
                 if not await self.session.async_client.hexists(self.cache_field, key):
                     if self.super_verbose: logger.info(f'[{self.cache_field}:{key}] Not Found')
                     return ENOVAL
@@ -812,11 +1035,13 @@ class CachifyKwargs(BaseModel):
         """
         # if not await self.ashould_cache_value(value): return
         try:
-            async with anyio.fail_after(self.timeout):
-                await self.session.async_client.hset(
-                    self.cache_field, key, 
-                    await self.aencode_hit(value, *args, **kwargs)
-                )
+            # async with anyio.fail_after(self.timeout):
+            async with afail_after(self.timeout):
+                await self._aset(key, await self.aencode_hit(value, *args, **kwargs))
+                # await self.session.async_client.hset(
+                #     self.cache_field, key, 
+                #     await self.aencode_hit(value, *args, **kwargs)
+                # )
                 if self.ttl:
                     await self.session.async_client.expire(self.cache_field, self.ttl)
         except TimeoutError:
@@ -829,36 +1054,44 @@ class CachifyKwargs(BaseModel):
         Clears the cache
         """
         async with asafely(timeout = self.timeout):
-            if keys:
-                return await self.session.async_client.hdel(self.cache_field, keys)
-            else:
-                return await self.session.async_client.delete(self.cache_field)
+            keys = keys or []
+            if isinstance(keys, str): keys = [keys]
+            return await self._aclear(*keys)
+            # if keys:
+            #     return await self.session.async_client.hdel(self.cache_field, keys)
+            # else:
+            #     return await self.session.async_client.delete(self.cache_field)
 
     def add_key_hit(self, key: str):
         """
         Adds a hit to the cache key
         """
         with safely(timeout = self.timeout):
-            key_hits = self.session.client.hget(self.cache_field, 'keyhits') or {}
+            key_hits = self._get('keyhits') or {}
+            # key_hits = self.session.client.hget(self.cache_field, 'keyhits') or {}
             if key not in key_hits: key_hits[key] = 0
             key_hits[key] += 1
-            self.session.client.hset(self.cache_field, 'keyhits', key_hits)
+            self._set('keyhits', key_hits)
+            # self.session.client.hset(self.cache_field, 'keyhits', key_hits)
 
     def add_key_timestamp(self, key: str):
         """
         Adds a timestamp to the cache key
         """
         with safely(timeout = self.timeout):
-            timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            timestamps = self._get('timestamps') or {}
+            # timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
             timestamps[key] = time.perf_counter()
-            self.session.client.hset(self.cache_field, 'timestamps', timestamps)
+            self._set('timestamps', timestamps)
+            # self.session.client.hset(self.cache_field, 'timestamps', timestamps)
 
     def add_hit(self):
         """
         Adds a hit to the cache
         """
         with safely(timeout = self.timeout):
-            self.session.client.hincrby(self.cache_field, 'hits', 1)
+            self._incr('hits')
+            # self.session.client.hincrby(self.cache_field, 'hits', 1)
 
 
     def encode_hit(self, value: Any, *args, **kwargs) -> bytes:
@@ -888,7 +1121,8 @@ class CachifyKwargs(BaseModel):
         if self.verbose: logger.info(f'[{self.cache_field}] Cache Max Size Reached: {num_keys}/{self.cache_max_size}. Running Cache Policy: {self.cache_max_size_policy}')
         if self.cache_max_size_policy == CachePolicy.LRU:
             # Least Recently Used
-            timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            timestamps = self._get('timestamps') or {}
+            # timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
             keys_to_delete = sorted(timestamps, key = timestamps.get)[:num_keys - self.cache_max_size]
             if key in keys_to_delete: keys_to_delete.remove(key)
             if self.verbose: logger.info(f'[{self.cache_field}] Deleting {len(keys_to_delete)} Keys: {keys_to_delete}')
@@ -897,7 +1131,8 @@ class CachifyKwargs(BaseModel):
         
         if self.cache_max_size_policy == CachePolicy.LFU:
             # Least Frequently Used
-            key_hits = self.session.client.hget(self.cache_field, 'keyhits') or {}
+            # key_hits = self.session.client.hget(self.cache_field, 'keyhits') or {}
+            key_hits = self._get('keyhits') or {}
             keys_to_delete = sorted(key_hits, key = key_hits.get)[:num_keys - self.cache_max_size]
             if key in keys_to_delete: keys_to_delete.remove(key)
             if self.verbose: logger.info(f'[{self.cache_field}] Deleting {len(keys_to_delete)} Keys: {keys_to_delete}')
@@ -906,7 +1141,8 @@ class CachifyKwargs(BaseModel):
         
         if self.cache_max_size_policy == CachePolicy.FIFO:
             # First In First Out
-            timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            # timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            timestamps = self._get('timestamps') or {}
             keys_to_delete = sorted(timestamps, key = timestamps.get, reverse = True)[:num_keys - self.cache_max_size]
             if key in keys_to_delete: keys_to_delete.remove(key)
             if self.verbose: logger.info(f'[{self.cache_field}] Deleting {len(keys_to_delete)} Keys: {keys_to_delete}')
@@ -915,7 +1151,8 @@ class CachifyKwargs(BaseModel):
         
         if self.cache_max_size_policy == CachePolicy.LIFO:
             # Last In First Out
-            timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            # timestamps = self.session.client.hget(self.cache_field, 'timestamps') or {}
+            timestamps = self._get('timestamps') or {}
             keys_to_delete = sorted(timestamps, key = timestamps.get)[:num_keys - self.cache_max_size]
             if key in keys_to_delete: keys_to_delete.remove(key)
             if self.verbose: logger.info(f'[{self.cache_field}] Deleting {len(keys_to_delete)} Keys: {keys_to_delete}')
@@ -1120,8 +1357,6 @@ def cachify_async(
     return decorator
 
         
-
-
 def cachify_sync(
     sess: 'KeyDBSession',
     _kwargs: CachifyKwargs,
@@ -1131,7 +1366,6 @@ def cachify_sync(
     """
     _kwargs.session = sess
     _kwargs.is_async = False
-
 
     def decorator(func):
 
@@ -1347,7 +1581,8 @@ def fallback_async_wrapper(func: FT, session: 'KeyDBSession', _kwargs: CachifyKw
         nonlocal _sess_ctx
         if _sess_ctx is None:
             with contextlib.suppress(Exception):
-                async with anyio.fail_after(1.0):
+                async with afail_after(1.0):
+                # async with anyio.fail_after(1.0):
                     if await session.async_client.ping(): _sess_ctx = session
             if _kwargs.verbose and _sess_ctx is None: logger.error('Could not connect to KeyDB')
         return _sess_ctx
@@ -1533,9 +1768,12 @@ if TYPE_CHECKING:
         hit_setter: Optional[Callable] = None,
         hit_getter: Optional[Callable] = None,
 
+        hset_enabled: Optional[bool] = True,
+
         # Private
         cache_field: Optional[str] = None,
         session: Optional['KeyDBSession'] = None,
+
         **kwargs,
     ) -> Callable[[FT], FT]:
         """
@@ -1564,6 +1802,7 @@ if TYPE_CHECKING:
             decoder (Optional[Union[str, Callable]], optional): The decoder for the cache. Defaults to None.
             hit_setter (Optional[Callable], optional): The hit setter for the cache. Defaults to None.
             hit_getter (Optional[Callable], optional): The hit getter for the cache. Defaults to None.
+            hset_enabled (Optional[bool], optional): Whether or not to use hset/hget/hdel/hmset/hmget/hmgetall. Defaults to True.
             
         """
         ...
@@ -1598,6 +1837,8 @@ if TYPE_CHECKING:
 
         hit_setter: Optional[Callable] = None,
         hit_getter: Optional[Callable] = None,
+        hset_enabled: Optional[bool] = True,
+
 
         # Private
         cache_field: Optional[str] = None,
@@ -1630,6 +1871,7 @@ if TYPE_CHECKING:
             decoder (Optional[Union[str, Callable]], optional): The decoder for the cache. Defaults to None.
             hit_setter (Optional[Callable], optional): The hit setter for the cache. Defaults to None.
             hit_getter (Optional[Callable], optional): The hit getter for the cache. Defaults to None.
+            hset_enabled (Optional[bool], optional): Whether or not to use hset/hget/hdel/hmset/hmget/hmgetall. Defaults to True.
             
         """
         ...

@@ -40,7 +40,7 @@ from aiokeydb.types.session import KeyDBSession, ClientPools
 from aiokeydb.serializers import SerializerType, BaseSerializer
 from aiokeydb.utils.lazy import get_keydb_settings
 from aiokeydb.utils.logs import logger
-
+from aiokeydb.utils.helpers import afail_after
 
 class KeyDBClientMeta(type):
 
@@ -4512,7 +4512,8 @@ class KeyDBClientMeta(type):
         Context manager that will fail after a certain timeout
         """
         try:
-            async with anyio.fail_after(timeout):
+            # async with anyio.fail_after(timeout):
+            async with afail_after(timeout):
                 yield
         except Exception as e:
             if verbose:
@@ -4913,7 +4914,8 @@ class KeyDBClientMeta(type):
                     if _sess_ctx: return _sess_ctx
                     _sess = cls.get_session(_session)
                     with contextlib.suppress(Exception):
-                        async with anyio.fail_after(1.0):
+                        # async with anyio.fail_after(1.0):
+                        async with afail_after(1.0):
                             if await _sess.async_ping(): _sess_ctx = _sess
                     
                     return _sess_ctx

@@ -52,6 +52,7 @@ from aiokeydb.utils.queue import (
 
 # from aiokeydb.configs import settings
 from aiokeydb.utils import set_ulimits, get_ulimits, get_keydb_settings
+from aiokeydb.utils.helpers import afail_after
 from aiokeydb.backoff import default_backoff
 from redis.asyncio.retry import Retry
 
@@ -2072,7 +2073,8 @@ class TaskQueue:
         Logs the current queue stats to keydb
         """
         try:
-            async with anyio.fail_after(10):
+            # with anyio.fail_after(10):
+            async with afail_after(10):
                 stats = await self.prepare_worker_metrics()
                 current = now()
                 # async with self.pipeline(transaction = True) as pipe:
@@ -2277,7 +2279,8 @@ class TaskQueue:
         Allows a block of code to fail without raising an exception.
         """
         try:
-            async with anyio.fail_after(duration):
+            # with anyio.fail_after(duration):
+            async with afail_after(duration):
                 yield
         except Exception as e:
             if verbose: logger.trace(f"Failed OK: {e}", error = e, level = "WARNING")

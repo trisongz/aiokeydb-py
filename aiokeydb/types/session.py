@@ -22,7 +22,7 @@ from aiokeydb.types import KeyDBUri, ENOVAL
 # from aiokeydb.configs import KeyDBSettings, settings as default_settings
 from aiokeydb.configs import KeyDBSettings
 from aiokeydb.utils import full_name, args_to_key, get_keydb_settings
-from aiokeydb.utils.helpers import create_retryable_client
+from aiokeydb.utils.helpers import create_retryable_client, afail_after
 from aiokeydb.utils.logs import logger
 from .cachify import cachify, create_cachify, FT
 
@@ -4124,6 +4124,7 @@ class KeyDBSession:
 
         hit_setter: typing.Optional[typing.Callable] = None,
         hit_getter: typing.Optional[typing.Callable] = None,
+        hset_enabled: typing.Optional[bool] = True,
         **kwargs,
     ) -> typing.Callable[[FT], FT]:
         """
@@ -4152,6 +4153,7 @@ class KeyDBSession:
             decoder (typing.Optional[Union[str, typing.Callable]], typing.Optional): The decoder for the cache. Defaults to None.
             hit_setter (typing.Optional[typing.Callable], typing.Optional): The hit setter for the cache. Defaults to None.
             hit_getter (typing.Optional[typing.Callable], typing.Optional): The hit getter for the cache. Defaults to None.
+            hset_enabled (typing.Optional[bool], typing.Optional): Whether or not to enable the hset cache. Defaults to True.
             
         """
         if _ttl := kwargs.pop('cache_ttl', None):
@@ -4180,6 +4182,7 @@ class KeyDBSession:
             decoder = decoder,
             hit_setter = hit_setter,
             hit_getter = hit_getter,
+            hset_enabled = hset_enabled,
             session = self,
             **kwargs,
         )
@@ -4897,7 +4900,8 @@ def build_cachify_async_func(
             _hits_key = f'{key}:hits'
             _num_hits = 0
             with contextlib.suppress(Exception):
-                with anyio.fail_after(_cache_timeout):
+                async with afail_after(_cache_timeout):
+                # with anyio.fail_after(_cache_timeout):
                     _num_hits = await session.async_get(_hits_key)
                     if _num_hits: _num_hits = int(_num_hits)
 
@@ -4905,19 +4909,22 @@ def build_cachify_async_func(
                 _invalidate_key = True
                 # logger.info(f'[{self.name}] Invalidating cache key: {key} after {_num_hits} hits')
                 with contextlib.suppress(Exception):
-                    with anyio.fail_after(_cache_timeout):
+                    # with anyio.fail_after(_cache_timeout):
+                    async with afail_after(_cache_timeout):
                         await session.async_delete(key)
                 
         if _invalidate_key:
             if session.settings.debug_enabled:
                 logger.info(f'[{session.name}] Invalidating cache key: {key}')
             with contextlib.suppress(Exception):
-                with anyio.fail_after(_cache_timeout):
+                # with anyio.fail_after(_cache_timeout):
+                async with afail_after(_cache_timeout):
                     await session.async_delete(key)
 
         # result = ENOVAL
         try:
-            with anyio.fail_after(_cache_timeout):
+            # with anyio.fail_after(_cache_timeout):
+            async with afail_after(_cache_timeout):
                 result = await session.async_get(key, default = ENOVAL)
         
         except TimeoutError:
@@ -4942,7 +4949,8 @@ def build_cachify_async_func(
                 return (result, False) if include_cache_hit else result
             if cache_ttl is None or cache_ttl > 0:
                 try:
-                    with anyio.fail_after(_cache_timeout):
+                    # with anyio.fail_after(_cache_timeout):
+                    async with afail_after(_cache_timeout):
                         await session.async_set(key, result, ex=cache_ttl)
                 except TimeoutError:
                     logger.error(f'[{session.name}] Calling SET on async KeyDB timed out. Cached function: {base}')
@@ -4955,7 +4963,8 @@ def build_cachify_async_func(
         
         elif _invalidate_after_n_hits:
             with contextlib.suppress(Exception):
-                with anyio.fail_after(_cache_timeout):
+                async with afail_after(_cache_timeout):
+                # with anyio.fail_after(_cache_timeout):
                     await session.async_incr(_hits_key)
         
         return (result, is_cache_hit) if include_cache_hit else result
