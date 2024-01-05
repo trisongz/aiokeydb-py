@@ -22,6 +22,7 @@ class CustomizeLogger:
         """
         Formats the log message for the worker.
         """
+        extra = ''
         if record['extra'].get('job_id') and record['extra'].get('queue_name') and record['extra'].get('kind'):
             status = record['extra'].get('status')
             color = STATUS_COLOR.get(status, FALLBACK_STATUS_COLOR)
