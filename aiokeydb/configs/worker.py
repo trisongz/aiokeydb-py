@@ -204,8 +204,9 @@ class KeyDBWorkerSettings(BaseSettings):
             if kwargs.get('_set_ctx'):
                 ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
             else:
-                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
-        
+                result = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+                if result is not None: ctx[name] = result
+                # ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         return ctx
     
     async def run_context(
@@ -223,7 +224,9 @@ class KeyDBWorkerSettings(BaseSettings):
             if kwargs.get('_set_ctx'):
                 ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
             else:
-                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+                result = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+                if result is not None: ctx[name] = result
+                # ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         return ctx
 
     async def run_startup_funcs(
@@ -242,7 +245,9 @@ class KeyDBWorkerSettings(BaseSettings):
                 # logger.info('Passing ctx to function')
                 ctx = await func(ctx, **kwargs) if is_coro_func(func) else func(ctx, **kwargs)
             else:
-                ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+                result = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
+                if result is not None: ctx[name] = result
+                # ctx[name] = await func(**kwargs) if is_coro_func(func) else func(**kwargs)
         return ctx
     
     async def run_shutdown_funcs(
