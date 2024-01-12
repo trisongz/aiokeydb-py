@@ -35,8 +35,9 @@ from aiokeydb.types.jobs import (
     INCOMPLETE_STATUSES,
 
 )
+from tenacity import RetryError
 import aiokeydb.exceptions as exceptions
-from aiokeydb.exceptions import JobError
+from aiokeydb.exceptions import JobError, ConnectionError
 from aiokeydb.utils.queue import (
     millis,
     now,
@@ -606,6 +607,22 @@ class TaskQueue:
         else:
             yield
 
+
+
+    @asynccontextmanager
+    async def _safe_ctx(self) -> typing.AsyncGenerator[KeyDBSession, None]:
+        """
+        Context manager to ensure that the queue is properly closed.
+        """
+        try:
+            yield self.ctx
+        except (RetryError, ConnectionError) as e:
+            self.logger(kind = "error").error(f"Connection Error in queue. Resetting Pools {e}")
+            await self.ctx.client_pools.arecreate_pools()
+            yield self.ctx
+        except Exception as e:
+            self.logger(kind = "error").error(f"Error in queue: {e}")
+
     def serialize(self, job: Job):
         """
         Dumps a job.
@@ -903,15 +920,23 @@ class TaskQueue:
         async with self.op_sephamore():
             return self.deserialize(await self.ctx.async_client.get(job_id))
 
-    async def wait_for_job_completion(self, job_id: str, results_only: typing.Optional[bool] = False, interval: float = 0.5) -> typing.Any:
+    async def wait_for_job_completion(self, job: typing.Union[str, Job], results_only: typing.Optional[bool] = False, interval: float = 0.5, raise_exceptions: typing.Optional[bool] = True, verbose: typing.Optional[bool] = True) -> typing.Any:
         """
         Waits for a job completion
         """
-        job = await self.job(job_id)
-        if not job: raise ValueError(f"Job {job_id} not found")
+        if isinstance(job, str):
+            job = await self.job(job)
+        if not job: raise ValueError(f"Job {job} not found")
         while job.status not in TERMINAL_STATUSES:
+            try: await job.refresh()
+            except RuntimeError: await job.enqueue()
+            except AttributeError as e:
+                if verbose: logger.error(f'Unable to refresh job {job}')
+                if raise_exceptions: raise e
             await asyncio.sleep(interval)
-            job = await self.job(job_id)
+            
+            if job.status == JobStatus.COMPLETE:
+                break
         if not results_only: return job
         return job.result if job.status == JobStatus.COMPLETE else job.error
 
@@ -1029,6 +1054,7 @@ class TaskQueue:
             
             await self.track_job(job)
 
+        
     async def _dequeue_job_id(
         self,
         timeout: int = 0,

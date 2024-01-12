@@ -60,6 +60,31 @@ class ClientPools(BaseModel):
             pool = self.pool.with_db_id(db_id),
             apool = self.apool.with_db_id(db_id),
         )
+    
+
+
+    async def arecreate_pools(
+        self,
+        inuse_connections: bool = True,
+        raise_exceptions: bool = False,
+        with_lock: bool = False,
+        **recreate_kwargs
+    ):
+        """
+        Resets the connection pools
+        """
+        self.pool = self.pool.recreate(
+            inuse_connections = inuse_connections,
+            raise_exceptions = raise_exceptions,
+            with_lock = with_lock,
+            **recreate_kwargs
+        )
+        self.apool = await self.apool.recreate(
+            inuse_connections = inuse_connections,
+            raise_exceptions = raise_exceptions,
+            with_lock = with_lock,
+            **recreate_kwargs
+        )
 
 
 class SessionCtx(BaseModel):

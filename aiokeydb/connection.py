@@ -6,6 +6,7 @@ import typing
 import contextlib
 import threading
 import inspect
+import copy
 from itertools import chain
 from queue import Empty, Full, Queue, LifoQueue
 from urllib.parse import parse_qs, unquote, urlparse, ParseResult
@@ -377,6 +378,34 @@ class ConnectionPool(_ConnectionPool):
         """
         self.disconnect(inuse_connections = inuse_connections, raise_exceptions = raise_exceptions, with_lock = False)
         self.reset()
+
+    
+    def recreate(
+        self,
+        inuse_connections: bool = True,
+        raise_exceptions: bool = False,
+        with_lock: bool = False,
+        **recreate_kwargs
+    ) -> 'ConnectionPool':
+        """
+        Recreates the connection pool
+        """
+        self.disconnect(
+            inuse_connections = inuse_connections,
+            raise_exceptions = raise_exceptions,
+            with_lock = with_lock,
+        )
+        connection_kwargs = copy.deepcopy(self.connection_kwargs)
+        if recreate_kwargs: connection_kwargs.update(recreate_kwargs)
+        return self.__class__(
+            connection_class=self.connection_class,
+            max_connections=self.max_connections,
+            auto_pubsub=self.auto_pubsub,
+            pubsub_decode_responses=self.pubsub_decode_responses,
+            auto_reset_enabled=self._auto_reset_enabled,
+            **connection_kwargs,
+        )
+
     
     @property
     def _stats(self):
@@ -505,6 +534,7 @@ class AsyncConnectionPool(_AsyncConnectionPool):
     @property
     def db_id(self):
         return self.connection_kwargs.get("db", 0)
+    
     
     def with_db_id(self, db_id: int) -> 'AsyncConnectionPool':
         """
@@ -648,6 +678,34 @@ class AsyncConnectionPool(_AsyncConnectionPool):
         #     logger.error(f"Resetting Connection: {conn}: {conn.pid}")
         #     await self.release(conn)
         self.reset()
+
+    async def recreate(
+        self,
+        inuse_connections: bool = True,
+        raise_exceptions: bool = False,
+        with_lock: bool = False,
+        **recreate_kwargs
+    ) -> 'AsyncConnectionPool':
+        """
+        Recreates the connection pool
+        """
+        await self.disconnect(
+            inuse_connections = inuse_connections,
+            raise_exceptions = raise_exceptions,
+            with_lock = with_lock,
+        )
+        connection_kwargs = copy.deepcopy(self.connection_kwargs)
+        if recreate_kwargs: connection_kwargs.update(recreate_kwargs)
+        return self.__class__(
+            connection_class=self.connection_class,
+            max_connections=self.max_connections,
+            auto_pubsub=self.auto_pubsub,
+            pubsub_decode_responses=self.pubsub_decode_responses,
+            auto_reset_enabled=self._auto_reset_enabled,
+            **connection_kwargs,
+        )
+
+    
 
 
     @property
